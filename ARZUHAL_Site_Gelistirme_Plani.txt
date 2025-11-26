@@ -1,0 +1,517 @@
+1–50: Temel Frontend ve UI/UX Geliştirmeleri
+
+Siteyi genel olarak analiz et, tüm sayfaları ve component’leri listele.
+
+Ana sayfa hero bölümünü optimize et ve responsive hale getir.
+
+Tüm header alanlarını mobil ve desktop uyumlu yap.
+
+Menü butonlarının hover ve focus efektlerini ekle.
+
+Hamburger menüyü mobil uyumlu ve dokunmatik testli yap.
+
+Footer alanını düzenle, tüm linklerin çalışmasını sağla.
+
+Ana sayfa banner slider’ını test et ve optimize et.
+
+Tüm başlık font ve tipografi uyumluluğunu sağla.
+
+Alt metin (alt text) ve aria-label eklemelerini kontrol et.
+
+UI component’lerinde tutarlılığı sağla (buton, modal, input).
+
+Hero ve banner alanlarında mobil uyumlu görsel kullan.
+
+Site genelinde renk paletini tutarlı yap.
+
+Linklerin hover efektlerini ve aktif durumlarını kontrol et.
+
+Scroll ve navigasyon animasyonlarını optimize et.
+
+Tüm CTA butonlarını test et ve görselleştir.
+
+Ürün kartlarının responsive tasarımını optimize et.
+
+Slider ve carousel bileşenlerini test et.
+
+Desktop için ekstra spacing ve padding düzenlemeleri yap.
+
+Mobilde font boyutlarını optimize et.
+
+Responsive grid ve flexbox yapısını kontrol et.
+
+Tüm icon ve görsellerin retina uyumunu sağla.
+
+Image lazy loading sistemi ekle.
+
+Mobilde menü ve linklerin tıklanabilirliğini test et.
+
+Breadcrumb navigasyonu ekle ve sayfa uyumunu sağla.
+
+Hero ve banner içeriklerinin SEO uyumunu kontrol et.
+
+Tüm form alanlarını responsive yap ve input validation ekle.
+
+Site genelinde tooltip ve bilgilendirme mesajları ekle.
+
+Kullanıcı deneyimini artıracak hover animasyonları ekle.
+
+Mobilde dokunmatik elementleri optimize et.
+
+Desktop hover ve focus testlerini yap.
+
+Hero başlık ve açıklama metinlerini optimize et.
+
+Ana sayfa içerik bloklarını test et ve uyumlu hale getir.
+
+Tüm başlıkların H1-H6 hiyerarşisini kontrol et.
+
+Ürün detay sayfası görsellerini optimize et.
+
+Ürün fiyat ve stok alanlarını doğru ve tutarlı yap.
+
+Ürün detay sayfasında kategori ve filtre alanlarını optimize et.
+
+Kampanya ve promosyon etiketlerini test et.
+
+Ürün detay sayfasında alt başlık ve açıklamaları kontrol et.
+
+Mobilde ürün görselleri için zoom ve swipe testleri yap.
+
+Desktop ürün slider’larını kontrol et ve optimize et.
+
+Admin paneli ve frontend arasında UI uyumunu kontrol et.
+
+Hero alanına alt metin (subtext) ekleyerek kullanıcıya bilgi ver.
+
+Alt metinlerde SEO dostu kelimeler kullan.
+
+Tüm linklerin doğru URL’ye yönlendiğini test et.
+
+Header ve footer linklerini test et ve tüm sayfalarda aktif olmasını sağla.
+
+Tüm CTA’lar için renk kontrastını erişilebilirlik uyumlu yap.
+
+Site genelinde görsel boyutlarını optimize et.
+
+Lazy load ve placeholder görselleri test et.
+
+Animasyon ve geçiş sürelerini optimize et.
+
+Site genelinde responsive testleri tamamla.
+
+
+
+
+
+
+Admin paneline giriş ve çıkış akışlarını test et.
+
+Admin şifre güvenliğini artır.
+
+Admin rol ve yetki kontrollerini optimize et.
+
+Ürün ekleme/düzenleme/silme akışını test et.
+
+Kategori ekleme/düzenleme/silme akışını test et.
+
+Hikaye modülü ekleme/düzenleme/silme akışını optimize et.
+
+Duyurular modülünü yönetilebilir yap.
+
+İletişim mesajları modülünü tam entegre yap.
+
+Admin panelinde mesaj okundu/yanıtlandı filtrelerini uygula.
+
+Admin paneli tablo görünümünü optimize et.
+
+Admin mesaj detay sayfası oluştur.
+
+Mesajlara admin notu ekleme özelliği ekle.
+
+Mesaj yanıt sistemi entegre et.
+
+Yeni mesaj geldiğinde admin panelde bildirim göster.
+
+Mesajları kategori ve etiketlerle filtrele.
+
+Admin paneli arama ve filtreleme sistemi ekle.
+
+Backend API performansını optimize et.
+
+Veritabanı sorgularını optimize et.
+
+Ürün ve kategori ilişkilerini doğrula.
+
+API endpoint’lerinin güvenliğini test et.
+
+Otomatik e-mail yanıt sistemini entegre et.
+
+Admin paneli görsel optimizasyonunu yap.
+
+Dashboard sayfasını test et ve performansını artır.
+
+Admin paneli CSS/JS dosyalarını minimize et.
+
+Backup ve deploy prosedürlerini kontrol et.
+
+Admin paneli için form validation ekle.
+
+Admin panelinde responsive testleri yap.
+
+Admin paneli tooltip ve bilgilendirme mesajlarını ekle.
+
+Tüm linklerin admin panelinde çalıştığını test et.
+
+Admin paneli görsel icon’ları retina uyumlu yap.
+
+Hatalı form girişlerinde uyarı mesajı göster.
+
+Admin paneli sayfa load hızını optimize et.
+
+Role based access kontrolünü güvenli hale getir.
+
+Admin paneli tablo kolonlarını düzenle ve optimize et.
+
+Admin paneli alert ve notification sistemini ekle.
+
+Admin panelinde log ve geçmiş kayıtları kontrol et.
+
+Admin paneli performans testlerini yap.
+
+Admin panelinde lazy load veya pagination ekle.
+
+Admin paneli ve frontend senkronizasyonunu kontrol et.
+
+Admin panelinde görsel yükleme optimizasyonu yap.
+
+Admin paneli data export/import özelliği ekle.
+
+Admin paneli kullanıcı işlemleri loglarını oluştur.
+
+Admin paneli ve frontend testlerini manuel yap.
+
+Admin paneli kullanıcı deneyimini artıracak UX iyileştirmeleri yap.
+
+Admin paneli bildirim badge’lerini test et.
+
+Admin paneli form input validation’ı artır.
+
+Admin paneli mobile uyumlu hale getir.
+
+Admin paneli cross-browser testlerini yap.
+
+Admin paneli güvenlik testlerini uygula.
+
+Admin panelinde sistem crash riskini minimize et.
+
+
+
+
+
+Ürün listeleme sayfalarındaki kategori filtrelerini optimize et.
+
+Ürün listeleme sayfalarında hızlı yükleme ve lazy load kullan.
+
+Ürün listeleme sayfalarında pagination ve scroll testlerini uygula.
+
+Ürün kartlarının mobil uyumluluğunu optimize et.
+
+Ürün görsellerinin zoom ve detay özelliklerini test et.
+
+Ürün detay sayfası description ve alt açıklamaları optimize et.
+
+Ürün detay sayfasında kategori ve kampanya etiketlerini göster.
+
+Ürün fiyat ve stok alanlarının doğruluğunu kontrol et.
+
+Sepet butonları ve CTA’ların görsel uyumunu optimize et.
+
+Checkout ve ödeme butonlarının responsive testlerini yap.
+
+Ürün detay sayfasında kullanıcı yorumları alanını test et.
+
+Ürün detay sayfasında sosyal paylaşım butonları ekle.
+
+Ürün detay sayfası ve listeleme sayfalarında hover efektlerini optimize et.
+
+Mobile swipe ve touch hareketlerini kontrol et.
+
+Desktop hover efektlerini test et ve optimize et.
+
+Arama çubuğu ve autocomplete özelliğini ekle/test et.
+
+Arama sonuç sayfasını optimize et.
+
+Arama filtreleme ve sıralama algoritmasını test et.
+
+Breadcrumb navigasyonu ürün sayfalarında test et.
+
+Ürün ve kategori linklerinin SEO dostu slug’larını doğrula.
+
+Alt metin ve aria-label’leri tüm ürün görsellerinde ekle.
+
+Banner ve slider alanlarını güncel içeriklerle test et.
+
+Kampanya ve promosyon görsellerini mobil ve desktop uyumlu yap.
+
+Hero alanındaki alt metin ve CTA’yı optimize et.
+
+Tüm sayfalarda responsive tipografi ve spacing ayarlarını kontrol et.
+
+CSS ve JS dosyalarını minimize et ve performans testini uygula.
+
+Görsel boyutlarını optimize et ve retina uyumlu yap.
+
+Lazy load ve placeholder görselleri optimize et.
+
+UI animasyon sürelerini optimize et ve UX testlerini yap.
+
+Mobil ve tablet testleri ile touch element optimizasyonu yap.
+
+Desktop ve mobile site hız testlerini uygula.
+
+Site genelinde accessibility testlerini uygula (kontrast, aria-label, alt text).
+
+CTA ve linklerin kontrast değerlerini test et ve optimize et.
+
+Ürün detay sayfasında “Koleksiyonu İncele” linkini test et.
+
+Ürün listelerinde filtreleme UI’sini test et ve iyileştir.
+
+Tüm listeleme ve detay sayfalarında SEO meta tag’larını optimize et.
+
+Ürün ve kategori sayfalarında OpenGraph ve sosyal paylaşım tag’larını kontrol et.
+
+Mobilde içerik kaymalarını test et ve düzenle.
+
+Desktop ve tablet breakpoint’lerini optimize et.
+
+Hero ve banner alanlarında responsive görsel ratio’larını kontrol et.
+
+Slider ve carousel navigasyon butonlarını optimize et.
+
+Hero ve banner CTA’larının click rate testlerini uygula.
+
+Ürün listeleme sayfasında stok bilgilerini doğru göster.
+
+Tüm ürün kartlarında hover ve focus görsellerini optimize et.
+
+Ürün sayfasındaki açıklamalar ve hikaye linklerini test et.
+
+Ürün ve kategori sayfalarında schema markup ekle.
+
+Ürün ve kategori sayfalarında Google Rich Snippet testlerini uygula.
+
+Arama çubuğu ve filtreler ile hızlı erişim testlerini uygula.
+
+Mobile cihazlarda tüm etkileşimleri dokunmatik test et.
+
+Desktop ve tablet üzerinde tüm hover, click ve focus efektlerini test et.
+
+151–200: Backend, Admin, İletişim ve Performans Optimizasyonları
+
+Backend API performansını kontrol et ve optimize et.
+
+Veritabanı sorgularını optimize et (product, category, campaign tablosu).
+
+Ürün ekleme/düzenleme/silme API endpoint’lerini test et.
+
+Kategori ekleme/düzenleme/silme API’lerini güvenli hale getir.
+
+Kampanya ve promosyon modüllerini backend ile entegre et.
+
+İletişim mesajları modülünü backend ile tam senkron yap.
+
+Duyurular modülünü API ile tam entegre et.
+
+Admin paneli rol ve yetki kontrollerini test et.
+
+Admin paneli kullanıcı giriş çıkış loglarını optimize et.
+
+Admin panelinde message read/unread filtrelerini optimize et.
+
+Admin panelinde mesaj detay sayfasını test et.
+
+Admin panelinde mesajlara admin notu eklemeyi test et.
+
+Admin panelinde mesaj yanıt sistemini test et.
+
+Yeni mesaj geldiğinde admin bildirim badge’ini test et.
+
+Mesajları kategori ve etiket ile filtrele.
+
+Admin paneli arama ve filtreleme sistemini optimize et.
+
+API endpoint’lerinin güvenlik testlerini yap (XSS, CSRF, SQLi).
+
+Otomatik e-mail yanıt sistemini entegre et/test et.
+
+Admin paneli tablolarında lazy load ve pagination kullan.
+
+Admin paneli performans testlerini uygula.
+
+
+
+
+Admin paneli form validation’larını optimize et.
+
+Admin panelinde responsive testlerini yap.
+
+Admin paneli tooltip ve bilgilendirme mesajlarını ekle/test et.
+
+Admin paneli görselleri retina uyumlu yap.
+
+Admin paneli alert ve notification sistemini optimize et.
+
+Admin panelinde log ve geçmiş kayıtlarını test et.
+
+Admin paneli kullanıcı deneyimi UX iyileştirmeleri uygula.
+
+Admin paneli bildirim ve badge sistemlerini test et.
+
+Admin paneli cross-browser testlerini yap.
+
+Admin paneli güvenlik testlerini uygula.
+
+Backend ve frontend senkronizasyonunu test et.
+
+Ürün, kategori ve kampanya verilerini optimize et.
+
+Tüm API endpoint’lerinde data validation uygula.
+
+Backend tarafında caching ve performans optimizasyonu yap.
+
+Siteye CDN entegrasyonunu hazırla/test et.
+
+Site genelinde SSL/HTTPS testlerini uygula.
+
+Sitemap.xml dosyasını oluştur ve test et.
+
+Robots.txt dosyasını optimize et.
+
+Meta title ve description her sayfa için kontrol et.
+
+OpenGraph ve Twitter Card tag’larını test et.
+
+SEO dostu URL yapılarını doğrula.
+
+Schema markup ve rich snippet testlerini uygula.
+
+Core Web Vitals değerlerini optimize et.
+
+Gzip veya Brotli sıkıştırmasını test et.
+
+Cache ve tarayıcı önbellekleme optimizasyonu yap.
+
+Site backup sistemini test et.
+
+Deploy ve update prosedürlerini kontrol et.
+
+Tüm linklerin çalıştığını test et.
+
+Ölü linkleri tespit et ve 301 yönlendirmeleri uygula.
+
+Manual QA ve test sürecini başlat, tüm admin ve frontend modüllerinin stabil çalıştığını doğrula.
+
+
+
+Tüm kampanya ve promosyon modüllerini backend ve frontend ile senkronize et.
+
+Kampanya banner ve görsellerinin mobil ve desktop uyumluluğunu test et.
+
+Promosyon linklerini SEO dostu hale getir.
+
+Ürün ve kampanya sayfalarında meta description ve title’ları optimize et.
+
+Ürün ve kampanya sayfaları için OpenGraph ve Twitter Card tag’larını ekle/test et.
+
+Tüm kampanya görselleri için alt metin (alt text) ekle.
+
+Kampanya ve promosyon CTA butonlarının performans testlerini yap.
+
+Yeni sezon veya özel kampanya duyurularını admin panelinden kolay ekle.
+
+İletişim modülünde spam ve bot filtreleme ekle.
+
+İletişim mesajları backend veritabanına güvenli şekilde kaydedilsin.
+
+Admin panelinde mesajları kategori ve öncelik ile filtrele.
+
+Admin paneli bildirim sistemini geliştirilmiş push notification ile entegre et.
+
+Ürün ve kampanya sayfalarında kullanıcı davranışlarını izlemek için analytics script ekle.
+
+Google Analytics ve GTM entegrasyonlarını test et.
+
+Kullanıcıların en çok tıkladığı ürün ve kategori verilerini topla.
+
+Dashboard üzerinde kullanıcı etkileşim raporlarını göster.
+
+Mobil ve desktop için performans testlerini uygula.
+
+Site hızı ve Core Web Vitals değerlerini artırıcı optimizasyon yap.
+
+CDN ve cache sistemlerini optimize et.
+
+Lazy load ve image optimization ile sayfa yükleme süresini kısalt.
+
+Tüm JavaScript ve CSS dosyalarını minimize et ve bundle yap.
+
+Sitemap.xml dosyasını güncel tut ve tüm sayfaları ekle.
+
+Robots.txt dosyasını optimize et ve test et.
+
+404 ve 301 yönlendirmelerini kontrol et.
+
+Tüm sayfalarda erişilebilirlik (accessibility) kontrollerini yap.
+
+Mobilde içerik kaymalarını önle ve responsive testleri uygula.
+
+Desktop ve tablet üzerinde hover ve focus efektlerini test et.
+
+SEO dostu URL ve slug yapısını tüm ürün, kategori ve kampanya sayfalarında uygula.
+
+Schema markup ve rich snippet testlerini yap.
+
+Tüm görsel ve medya dosyalarının performansını optimize et.
+
+Ürün, kategori ve kampanya sayfalarında breadcrumb navigasyonu test et.
+
+Hero ve banner alanlarında click rate ve kullanıcı etkileşimini ölç.
+
+Tüm CTA ve linklerin conversion tracking ile uyumlu olmasını sağla.
+
+Backend tarafında veri doğrulama ve rate-limit uygulamalarını ekle.
+
+Güvenlik için XSS, CSRF ve SQLi testlerini uygula.
+
+Admin paneli erişim loglarını güvenli şekilde sakla.
+
+Yedekleme ve restore prosedürlerini test et.
+
+Deploy ve update sırasında rollback planı oluştur.
+
+Site genelinde SSL/HTTPS geçerliliğini test et.
+
+Tüm form ve input alanlarına validation ekle.
+
+Admin panelinde kullanıcı aktivitelerini logla ve raporla.
+
+Ürün ve kampanya sayfalarında heatmap ve analytics verilerini kontrol et.
+
+Mobilde touch elementlerin doğru çalışmasını test et.
+
+Tüm sayfalarda meta tag ve social sharing testlerini yap.
+
+Admin paneli ve frontend arasında veri senkronizasyonunu test et.
+
+Analytics verilerini grafik ve tablo olarak dashboard’a entegre et.
+
+Yeni özellik ve modüllerin incremental patch mantığıyla uygulanmasını sağla.
+
+Siteyi çökertmeden tüm optimizasyonların testlerini yap.
+
+QA sürecinde tüm frontend, backend, admin panel ve modülleri manuel test et.
+
+Siteyi production ortamına güvenli ve stabil şekilde deploy et.
