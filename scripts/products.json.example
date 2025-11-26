@@ -1,0 +1,40 @@
+[
+  {
+    "name": "Klasik Fincan Seti 1",
+    "description": "Zamansız tasarımıyla klasik koleksiyonumuzun öne çıkan ürünlerinden biri.",
+    "category": "klasik",
+    "price": 150.00,
+    "material": "Porselen",
+    "dimensions": {
+      "height": 5,
+      "width": 6,
+      "depth": 5,
+      "unit": "cm"
+    },
+    "images": [
+      "/uploads/products/klasik-1.jpg"
+    ],
+    "collectionTags": ["Klasik", "Set"]
+  },
+  {
+    "name": "Klasik Fincan Seti 2",
+    "description": "Geleneksel Türk kahve kültürünü yansıtan özel tasarım.",
+    "category": "klasik",
+    "price": 175.00,
+    "material": "Porselen",
+    "dimensions": {
+      "height": 5.5,
+      "width": 6.5,
+      "depth": 5.5,
+      "unit": "cm"
+    },
+    "images": [
+      "/uploads/products/klasik-2.jpg"
+    ],
+    "collectionTags": ["Klasik"]
+  }
+]
+
+
+
+

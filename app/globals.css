@@ -1,0 +1,188 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-serif: 'Georgia', serif;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+      sans-serif;
+  }
+
+  * {
+    @apply border-charcoal-900/10;
+  }
+
+  body {
+    @apply bg-cream-50 text-charcoal-900 antialiased;
+    font-family: var(--font-sans);
+    background-image: 
+      radial-gradient(circle at 1px 1px, rgba(0, 0, 0, 0.015) 1px, transparent 0);
+    background-size: 40px 40px;
+    background-position: 0 0, 20px 20px;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-serif);
+    @apply font-semibold;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  h1 {
+    @apply text-4xl sm:text-5xl md:text-6xl lg:text-7xl;
+    font-weight: 700;
+  }
+
+  h2 {
+    @apply text-3xl sm:text-4xl md:text-5xl;
+    font-weight: 600;
+  }
+
+  h3 {
+    @apply text-2xl sm:text-3xl md:text-4xl;
+    font-weight: 600;
+  }
+
+  h4 {
+    @apply text-xl sm:text-2xl md:text-3xl;
+    font-weight: 600;
+  }
+
+  h5 {
+    @apply text-lg sm:text-xl md:text-2xl;
+    font-weight: 500;
+  }
+
+  h6 {
+    @apply text-base sm:text-lg md:text-xl;
+    font-weight: 500;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .premium-transition {
+    @apply transition-all duration-300 ease-out;
+  }
+
+  /* Smooth scroll */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Scroll animations optimization */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  .premium-hover {
+    @apply premium-transition hover:scale-[1.02] hover:shadow-xl;
+  }
+
+  /* Glassmorphism utilities */
+  .glass-light {
+    @apply bg-white/60 backdrop-blur-sm border border-charcoal-900/10;
+  }
+
+  .glass-medium {
+    @apply bg-white/80 backdrop-blur-md border border-charcoal-900/10 shadow-lg;
+  }
+
+  .glass-strong {
+    @apply bg-white/90 backdrop-blur-lg border border-charcoal-900/10 shadow-xl;
+  }
+
+  /* Depth shadows */
+  .shadow-depth-sm {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+
+  .shadow-depth-md {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.06);
+  }
+
+  .shadow-depth-lg {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.08);
+  }
+
+  .shadow-depth-xl {
+    box-shadow: 0 16px 64px rgba(0, 0, 0, 0.16), 0 8px 16px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Premium gradient text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-charcoal-900 via-gold-500 to-charcoal-900 bg-clip-text text-transparent;
+  }
+
+  /* Touch optimization */
+  .touch-manipulation {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Responsive spacing utilities */
+  .spacing-responsive {
+    @apply px-4 sm:px-6 md:px-8 lg:px-12;
+  }
+
+  /* Desktop extra spacing */
+  @media (min-width: 1024px) {
+    .desktop-spacing {
+      @apply px-12 py-16;
+    }
+  }
+
+  /* Mobile font optimization */
+  @media (max-width: 640px) {
+    body {
+      font-size: 16px;
+      line-height: 1.6;
+    }
+  }
+
+  /* Retina display optimization */
+  @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+    img {
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+    }
+  }
+
+  /* Scrollbar hide utility */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+
+
