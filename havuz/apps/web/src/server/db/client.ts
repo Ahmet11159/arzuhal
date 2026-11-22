@@ -47,6 +47,8 @@ async function init(): Promise<DB> {
       await seed(db);
     }
   }
+  const { startScheduler } = await import('../jobs');
+  startScheduler(db);
   return db;
 }
 

@@ -88,3 +88,12 @@ export function timeLeft(cutoffAt: Date | string, now: Date = new Date()) {
     expired: ms === 0,
   };
 }
+
+/** Sipariş alınabilen dalga: açık, kapanışı geçmemiş; birden fazlaysa en yakın kapanış. Sunucu da aynı kuralı uygular. */
+export function pickActiveWave<T extends { status: string; cutoffAt: string | Date }>(waves: T[], now: Date = new Date()): T | null {
+  return (
+    waves
+      .filter((w) => w.status === 'open' && new Date(w.cutoffAt) > now)
+      .sort((a, b) => new Date(a.cutoffAt).getTime() - new Date(b.cutoffAt).getTime())[0] ?? null
+  );
+}

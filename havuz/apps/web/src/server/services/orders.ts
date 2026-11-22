@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, sql } from 'drizzle-orm';
 import {
   canTransition,
   computeOrderTotals,
@@ -20,7 +20,7 @@ import type { DB, Executor } from '../db/client';
 import * as s from '../db/schema';
 import { AppError, badRequest, forbidden, notFound } from '../http';
 import type { SessionPayload } from '../auth/secret';
-import { creditBalance, getActiveWave, iso, outstanding, pooledForWave, STATUS_STEPS } from './common';
+import { creditBalance, iso, outstanding, pooledForWave, STATUS_STEPS } from './common';
 
 type OrderRow = typeof s.orders.$inferSelect & {
   wave: typeof s.waves.$inferSelect | null;
@@ -132,26 +132,43 @@ export async function createOrder(db: DB, session: SessionPayload, raw: unknown)
   for (const it of input.items) merged.set(it.offerId, (merged.get(it.offerId) ?? 0) + it.qty);
 
   const orderId = await db.transaction(async (tx) => {
-    const member = await tx.query.organizations.findFirst({ where: eq(s.organizations.id, session.org) });
+    // KİLİT SIRASI (tüm işlemlerde aynı): dalga → üye → teklifler. Dalga kapanışı da önce dalgayı
+    // kilitlediği için sipariş ile kapanış birbirini karşılıklı beklemez (deadlock oluşmaz).
+    let waveId: string | null = null;
+    if (input.waveId) {
+      // Paylaşımlı kilit: kapanış (FOR UPDATE) süren siparişleri bekler; kapanıştan sonra gelen
+      // sipariş dalgayı "kapalı" görür ve reddedilir.
+      const [wave] = await tx
+        .select({ id: s.waves.id })
+        .from(s.waves)
+        .where(and(eq(s.waves.id, input.waveId), eq(s.waves.status, 'open'), gt(s.waves.cutoffAt, new Date())))
+        .for('share');
+      if (!wave) throw badRequest('Bu dalga siparişe kapandı');
+      waveId = wave.id;
+    }
+
+    // Üye satırı kilitlenir: aynı üyenin eşzamanlı siparişleri sıraya girer
+    // (kredi bakiyesi ve vadeli limit iki kez harcanamaz).
+    const [member] = await tx.select().from(s.organizations).where(eq(s.organizations.id, session.org)).for('no key update');
     if (!member || member.type !== 'member') throw forbidden();
     if (!isTermAllowed(member.plan, input.paymentTerm)) {
       throw badRequest('60 gün vade yalnızca Pro üyelerde kullanılabilir');
     }
 
+    // Teklif satırları sabit sırayla kilitlenir (kilitlenme/deadlock olmaz); stok kontrolü güvenli.
+    await tx
+      .select({ id: s.offers.id })
+      .from(s.offers)
+      .where(inArray(s.offers.id, [...merged.keys()]))
+      .orderBy(asc(s.offers.id))
+      .for('no key update');
     const offerRows = await tx.query.offers.findMany({
       where: inArray(s.offers.id, [...merged.keys()]),
       with: { product: true, supplier: true },
     });
     if (offerRows.length !== merged.size) throw badRequest('Sepetteki bazı ürünler artık mevcut değil');
 
-    let waveId: string | null = null;
-    let pooled: Record<string, number> = {};
-    if (input.waveId) {
-      const wave = await getActiveWave(tx);
-      if (!wave || wave.id !== input.waveId) throw badRequest('Bu dalga siparişe kapandı');
-      waveId = wave.id;
-      pooled = await pooledForWave(tx, wave.id, [...merged.keys()]);
-    }
+    const pooled = waveId ? await pooledForWave(tx, waveId, [...merged.keys()]) : {};
 
     const lines = offerRows.map((o) => {
       const qty = merged.get(o.id)!;
@@ -224,10 +241,12 @@ export async function createOrder(db: DB, session: SessionPayload, raw: unknown)
     );
 
     for (const l of lines) {
-      await tx
+      const updated = await tx
         .update(s.offers)
         .set({ stock: sql`${s.offers.stock} - ${l.qty}` })
-        .where(eq(s.offers.id, l.o.id));
+        .where(and(eq(s.offers.id, l.o.id), gte(s.offers.stock, l.qty)))
+        .returning({ id: s.offers.id });
+      if (updated.length === 0) throw badRequest(`${l.o.product.name} için yeterli stok kalmadı`);
     }
 
     if (totals.creditApplied > 0) {
@@ -266,7 +285,7 @@ export async function syncOrderStatus(tx: Executor, orderId: string) {
 
 export async function updateItemStatus(db: DB, session: SessionPayload, itemId: string, to: ItemStatus) {
   await db.transaction(async (tx) => {
-    const item = await tx.query.orderItems.findFirst({ where: eq(s.orderItems.id, itemId) });
+    const [item] = await tx.select().from(s.orderItems).where(eq(s.orderItems.id, itemId)).for('no key update');
     if (!item) throw notFound('Kalem');
     if (session.role === 'supplier' && item.supplierId !== session.org) throw notFound('Kalem');
     if (!canTransition(item.status, to)) throw badRequest('Bu durum geçişine izin verilmiyor');
@@ -276,9 +295,47 @@ export async function updateItemStatus(db: DB, session: SessionPayload, itemId: 
         .update(s.offers)
         .set({ stock: sql`${s.offers.stock} + ${item.qty}` })
         .where(eq(s.offers.id, item.offerId));
+      await refundCancelledItem(tx, item);
     }
     await syncOrderStatus(tx, item.orderId);
   });
+}
+
+/**
+ * İptal edilen kalemin bedeli üyeye geri verilir:
+ *  - ödenmiş siparişte → KDV dahil tutar kredi defterine iade,
+ *  - vadesi bekleyen siparişte → borç (ve orantılı vade farkı) düşülür.
+ */
+async function refundCancelledItem(tx: Executor, item: typeof s.orderItems.$inferSelect) {
+  const [order] = await tx.select().from(s.orders).where(eq(s.orders.id, item.orderId)).for('no key update');
+  if (!order) return;
+  const net = item.qty * item.finalUnitPrice;
+  const vat = Math.round((net * item.vatRate) / 100);
+  const gross = net + vat;
+  if (order.paymentStatus === 'paid') {
+    await tx.insert(s.ledgerEntries).values({
+      orgId: order.memberId,
+      type: 'adjustment',
+      amount: gross,
+      description: `${order.number} iptal edilen kalem iadesi`,
+      refId: order.id,
+    });
+    return;
+  }
+  const base = order.subtotal + order.vat;
+  const feeShare = base > 0 ? Math.round((order.financingFee * gross) / base) : 0;
+  const total = Math.max(0, order.total - gross - feeShare);
+  await tx
+    .update(s.orders)
+    .set({
+      subtotal: Math.max(0, order.subtotal - net),
+      vat: Math.max(0, order.vat - vat),
+      financingFee: Math.max(0, order.financingFee - feeShare),
+      total,
+      paymentStatus: total === 0 ? 'paid' : order.paymentStatus,
+      paidAt: total === 0 ? new Date() : order.paidAt,
+    })
+    .where(eq(s.orders.id, order.id));
 }
 
 /** Üye "teslim aldım" der: yoldaki tüm kalemler teslim edilmiş sayılır. */

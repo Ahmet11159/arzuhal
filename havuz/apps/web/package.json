@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:seed": "tsx scripts/seed.ts",
-    "db:reset": "tsx scripts/seed.ts --reset"
+    "db:reset": "tsx scripts/seed.ts --reset",
+    "verify": "tsx scripts/verify.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.17",

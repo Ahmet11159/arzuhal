@@ -45,6 +45,7 @@ Giriş ekranında her rol için tek tıkla demo butonu vardır.
 | `npm run db:generate` | Şema değişikliğinden SQL migration üretir (drizzle-kit) |
 | `npm run db:seed` | Boş veritabanına demo verisi yükler |
 | `npm run db:reset` | Tüm tabloları temizleyip demo verisini yeniden yükler |
+| `npm run verify` | Çalışan sunucuya karşı 68 kontrollü arka uç doğrulaması (yetki, para hesapları, eşzamanlı stok/kredi/dalga yarışları, iptal iadesi, bakım işleri). Önce `npm run db:reset`. |
 
 ## Ortam değişkenleri (`apps/web/.env`)
 
@@ -54,6 +55,8 @@ Giriş ekranında her rol için tek tıkla demo butonu vardır.
 | `DATABASE_URL` | boş → PGlite | Doluysa PostgreSQL'e bağlanır (`postgres://…`). Migration'lar açılışta otomatik uygulanır. |
 | `PGLITE_DIR` | `./.data/pglite` | Gömülü veritabanı klasörü. |
 | `AUTO_SEED` | geliştirmede `true`, production'da `false` | Boş veritabanına demo verisi yüklensin mi? |
+| `CRON_SECRET` | boş | `/api/v1/cron/maintenance` uç noktasının anahtarı (sunucusuz kurulumda zamanlanmış görev için). |
+| `HAVUZ_SCHEDULER` | açık | `off` ise dakikalık otomatik bakım (dalga kapatma, gecikmiş ödeme) süreç içinde çalışmaz. |
 
 ## Ne içeriyor?
 

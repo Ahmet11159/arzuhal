@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { ArrowRight, Check, Gift, Plus, Users, Waves } from 'lucide-react';
-import { formatTRY, formatTRYCompact, WAVE_STATUS_LABEL } from '@havuz/core';
+import { formatTRY, formatTRYCompact, pickActiveWave, WAVE_STATUS_LABEL } from '@havuz/core';
 import { useWave, useWaves } from '@havuz/sdk';
 import { PageHeader } from '@/components/app/page-header';
 import { WaveBanner } from '@/components/app/wave-banner';
@@ -23,7 +23,7 @@ type Filter = 'near' | 'all' | 'unlocked';
 
 export default function WavePage() {
   const waves = useWaves();
-  const active = useMemo(() => waves.data?.waves.find((w) => w.status === 'open' && new Date(w.cutoffAt) > new Date()) ?? null, [waves.data]);
+  const active = useMemo(() => (waves.data ? pickActiveWave(waves.data.waves) : null), [waves.data]);
   const detail = useWave(active?.id);
   const [filter, setFilter] = useState<Filter>('near');
   const lines = useCart((s) => s.lines);

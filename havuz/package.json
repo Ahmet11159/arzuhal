@@ -16,7 +16,8 @@
     "db:reset": "npm run db:reset -w @havuz/web",
     "test": "npm run test -w @havuz/core",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "npm run lint -w @havuz/web"
+    "lint": "npm run lint -w @havuz/web",
+    "verify": "npm run verify -w @havuz/web"
   },
   "engines": {
     "node": ">=20"

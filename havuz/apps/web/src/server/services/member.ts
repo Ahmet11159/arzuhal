@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, desc, eq, gt, inArray, notInArray } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, notInArray, sql } from 'drizzle-orm';
 import { PRO_MONTHLY_FEE, type AccountDTO, type MemberDashboardDTO } from '@havuz/core';
 import type { DB } from '../db/client';
 import * as s from '../db/schema';
@@ -145,14 +145,14 @@ export async function memberAccount(db: DB, session: SessionPayload): Promise<Ac
 }
 
 export async function upgradeToPro(db: DB, session: SessionPayload) {
-  const org = await db.query.organizations.findFirst({ where: eq(s.organizations.id, session.org) });
-  if (!org) throw notFound('İşletme');
-  if (org.plan === 'pro') throw badRequest('Zaten Pro üyesiniz');
   await db.transaction(async (tx) => {
-    await tx
+    // Koşullu güncelleme: yalnızca 'free' plandan geçiş yapılır; çift tıklama iki abonelik yazmaz.
+    const [org] = await tx
       .update(s.organizations)
-      .set({ plan: 'pro', creditLimit: Math.max(org.creditLimit, 25_000_000) })
-      .where(eq(s.organizations.id, org.id));
+      .set({ plan: 'pro', creditLimit: sql`greatest(${s.organizations.creditLimit}, 25000000)` })
+      .where(and(eq(s.organizations.id, session.org), eq(s.organizations.type, 'member'), eq(s.organizations.plan, 'free')))
+      .returning({ id: s.organizations.id });
+    if (!org) throw badRequest('Zaten Pro üyesiniz');
     const now = new Date();
     await tx.insert(s.subscriptions).values({ orgId: org.id, amount: PRO_MONTHLY_FEE, periodStart: new Date(now.getFullYear(), now.getMonth(), 1) });
   });

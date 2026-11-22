@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, desc, eq, inArray, ne } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, ne } from 'drizzle-orm';
 import {
   bestPossiblePrice,
   closeWave as closeWaveDomain,
@@ -55,6 +55,13 @@ export async function getWave(db: DB, id: string): Promise<WaveDetailDTO> {
 
 export async function createWave(db: DB, raw: unknown): Promise<WaveDTO> {
   const input = createWaveInput.parse(raw);
+  if (input.cutoffAt <= new Date()) throw badRequest('Kapanış tarihi gelecekte olmalı');
+  const [clash] = await db
+    .select({ title: s.waves.title })
+    .from(s.waves)
+    .where(and(eq(s.waves.status, 'open'), eq(s.waves.region, input.region), gt(s.waves.cutoffAt, new Date())))
+    .limit(1);
+  if (clash) throw badRequest(`${input.region} bölgesinde zaten açık bir dalga var (${clash.title}). Önce onu kapatın.`);
   const [last] = await db.select({ code: s.waves.code }).from(s.waves).orderBy(desc(s.waves.cutoffAt)).limit(1);
   const n = last ? Number(last.code.replace(/\D/g, '')) + 1 : 1;
   const [w] = await db
@@ -78,7 +85,8 @@ export async function createWave(db: DB, raw: unknown): Promise<WaveDTO> {
  */
 export async function closeWave(db: DB, id: string) {
   return db.transaction(async (tx) => {
-    const w = await tx.query.waves.findFirst({ where: eq(s.waves.id, id) });
+    // Satır kilidi: eşzamanlı ikinci kapanış ve kapanış sırasında yazılan siparişler sıraya girer.
+    const [w] = await tx.select().from(s.waves).where(eq(s.waves.id, id)).for('update');
     if (!w) throw notFound('Dalga');
     if (w.status !== 'open') throw badRequest('Dalga zaten kapalı');
 

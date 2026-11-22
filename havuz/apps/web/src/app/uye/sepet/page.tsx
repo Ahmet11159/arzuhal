@@ -12,6 +12,7 @@ import {
   formatPercent,
   formatTRY,
   isTermAllowed,
+  pickActiveWave,
   PAYMENT_TERM_LABEL,
   PAYMENT_TERMS,
   type OfferDTO,
@@ -54,7 +55,7 @@ export default function CartPage() {
   const credit = account.data?.creditBalance ?? 0;
   const waves = useWaves();
   const activeWave = useMemo(
-    () => waves.data?.waves.find((w) => w.status === 'open' && new Date(w.cutoffAt) > new Date()) ?? null,
+    () => (waves.data ? pickActiveWave(waves.data.waves) : null),
     [waves.data],
   );
 

@@ -86,6 +86,32 @@ olarak kredi defterine yazılır.
 - **Finansman:** vade farkının fonlama ortağı payı (%60) düşüldükten sonra kalan kısmı.
 - **Sponsorlu ürün:** tedarikçilerin öne çıkarma ücretleri.
 
+### 4.5 Eşzamanlılık ve kilit sırası
+Canlıda PostgreSQL istekleri paralel çalıştırır. Para, stok ve kredi tutarlılığı satır kilitleriyle korunur.
+Tüm işlemler kilitleri **aynı sırayla** alır, böylece kilitlenme (deadlock) oluşmaz:
+
+```
+dalga (FOR SHARE / kapanışta FOR UPDATE) → üye (FOR NO KEY UPDATE) → teklifler (id sırasıyla) → kalem → sipariş
+```
+
+- Stok düşümü koşulludur (`stock >= qty`); stok asla eksiye düşmez.
+- Üye satırı kilidi, aynı üyenin eşzamanlı siparişlerinde kredinin ve vadeli limitin iki kez harcanmasını engeller.
+- Dalga kapanışı ile o anda gelen siparişler sıraya girer. Kapanıştan sonra gelen sipariş "dalga kapandı" yanıtı alır.
+- Mal kabul onayı, Pro geçişi ve borç ödemesi koşullu güncelleme ya da kilitle tek seferliktir.
+- `FOR NO KEY UPDATE`, yabancı anahtar kontrollerinin aldığı `KEY SHARE` kilidiyle çakışmaz.
+
+Bu kurallar `npm run verify` ile gerçek PostgreSQL üzerinde eşzamanlı isteklerle test edilir.
+
+### 4.6 İptal ve iade
+Tedarikçinin iptal ettiği kalemin stoğu geri eklenir. Ödenmiş siparişte KDV dahil bedel kredi defterine
+`adjustment` olarak iade edilir. Vadesi bekleyen siparişte borç ve orantılı vade farkı düşülür.
+
+### 4.7 Zamanlanmış bakım (`server/jobs.ts`)
+İdempotent işler: kapanış saati geçen dalgayı kapatıp iadeleri yazar, teslim tarihi geçen dalgayı
+"teslim edildi" yapar, vadesi geçen borcu "gecikmiş" olarak işaretler. Uzun ömürlü sunucuda dakikada bir
+kendiliğinden çalışır. Sunucusuz ortamda `GET /api/v1/cron/maintenance` uç noktası (`Authorization: Bearer $CRON_SECRET`)
+zamanlanmış görevle çağrılır.
+
 ## 5. Güvenlik
 
 - Oturum: HS256 JWT. Web'de `httpOnly` + `SameSite=Lax` çerez, mobilde `Authorization: Bearer`
@@ -95,8 +121,9 @@ olarak kredi defterine yazılır.
   Middleware, `/uye`, `/tedarikci` ve `/yonetim` alanlarını role göre yönlendirir.
 - Tüm girdiler zod şemalarıyla doğrulanır. Hatalar tek formatta döner: `{ error: { code, message } }`.
 - Şifreler bcrypt ile saklanır. Girişte kullanıcı bulunamasa da hash karşılaştırması yapılır.
-- Giriş ve başvuru uç noktalarında süreç içi hız sınırlaması vardır. Çok sunuculu kurulumda
-  Redis tabanlı sınırlayıcıya taşınmalıdır.
+- Giriş: yalnızca başarısız denemeler sayılır (IP başına 50, hesap başına 8 deneme / 15 dk). IP adresi
+  istemcinin değiştirebileceği başlıktan değil, güvenilir proxy değerinden okunur. Başvuru formu da sınırlıdır.
+  Sınırlayıcı süreç içidir; çok sunuculu kurulumda aynı arayüzle Redis'e taşınmalıdır.
 - Güvenlik başlıkları `next.config.mjs` içinde tanımlıdır.
 
 ## 6. Mobil uygulamaya geçiş

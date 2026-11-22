@@ -83,18 +83,41 @@ export async function parseBody<S extends ZodTypeAny>(req: Request, schema: S): 
   return schema.parse(json);
 }
 
-/** Basit, süreç içi hız sınırlayıcı (giriş ve başvuru uç noktaları için). */
+/**
+ * Süreç içi hız sınırlayıcı (tek sunucu için). Çok sunuculu kurulumda aynı arayüzle Redis'e taşınır.
+ * `rateLimit` her çağrıyı sayar; `assertNotLimited` + `recordFailure` yalnızca başarısız denemeleri sayar.
+ */
 const buckets = new Map<string, { n: number; reset: number }>();
-export function rateLimit(key: string, limit: number, windowMs: number) {
+function bucket(key: string, windowMs: number) {
   const now = Date.now();
-  const b = buckets.get(key);
+  let b = buckets.get(key);
   if (!b || b.reset < now) {
-    buckets.set(key, { n: 1, reset: now + windowMs });
-    return;
+    b = { n: 0, reset: now + windowMs };
+    buckets.set(key, b);
   }
-  if (++b.n > limit) throw new AppError(429, 'rate_limited', 'Çok fazla deneme. Lütfen biraz sonra tekrar deneyin.');
+  if (buckets.size > 50_000) for (const [k, v] of buckets) if (v.reset < now) buckets.delete(k);
+  return b;
+}
+const limited = () => new AppError(429, 'rate_limited', 'Çok fazla deneme. Lütfen biraz sonra tekrar deneyin.');
+
+export function rateLimit(key: string, limit: number, windowMs: number) {
+  if (++bucket(key, windowMs).n > limit) throw limited();
+}
+export function assertNotLimited(key: string, limit: number, windowMs: number) {
+  if (bucket(key, windowMs).n >= limit) throw limited();
+}
+export function recordFailure(key: string, windowMs: number) {
+  bucket(key, windowMs).n++;
 }
 
+/**
+ * İstemci IP'si. X-Forwarded-For'un ilk değeri istemci tarafından uydurulabilir; bu yüzden
+ * önce proxy'nin yazdığı x-real-ip, yoksa zincirdeki son (güvenilir proxy'nin eklediği) değer kullanılır.
+ */
 export function clientIp(req: Request): string {
-  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'local';
+  const real = req.headers.get('x-real-ip');
+  if (real) return real.trim();
+  const xff = req.headers.get('x-forwarded-for');
+  if (xff) return xff.split(',').pop()!.trim();
+  return 'local';
 }

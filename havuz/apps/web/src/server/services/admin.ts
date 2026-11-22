@@ -215,6 +215,8 @@ export async function adminIssues(db: DB): Promise<AdminIssueDTO[]> {
 export async function resolveIssue(db: DB, id: string, raw: unknown) {
   const input = resolveIssueInput.parse(raw);
   await db.transaction(async (tx) => {
+    // Satır kilidi: aynı bildirimin iki kez onaylanıp iki kez kredi yazılması engellenir.
+    await tx.select({ id: s.issues.id }).from(s.issues).where(eq(s.issues.id, id)).for('update');
     const issue = await tx.query.issues.findFirst({ where: eq(s.issues.id, id), with: { item: { with: { order: true } } } });
     if (!issue) throw notFound('Bildirim');
     if (issue.status !== 'open') throw badRequest('Bildirim zaten sonuçlandırıldı');
