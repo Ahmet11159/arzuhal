@@ -13,11 +13,13 @@ import { Segmented } from '@/components/ui/segmented';
 import { EmptyState, ErrorState } from '@/components/ui/empty';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmtDate } from '@/lib/format';
+import { Sheet } from '@/components/ui/sheet';
 
 export default function AdminIssues() {
   const { data, isLoading, error, refetch } = useAdminIssues();
   const resolve = useResolveIssue();
   const [tab, setTab] = useState<'open' | 'closed'>('open');
+  const [preview, setPreview] = useState<string | null>(null);
   const list = useMemo(() => (data?.issues ?? []).filter((i) => (tab === 'open' ? i.status === 'open' : i.status !== 'open')), [data, tab]);
 
   async function act(id: string, status: 'resolved' | 'rejected') {
@@ -57,9 +59,16 @@ export default function AdminIssues() {
             const credit = Math.round(i.qty * i.unitPrice * (1 + i.vatRate / 100));
             return (
               <div key={i.id} className="flex flex-wrap items-center gap-4 px-5 py-4">
-                <span className="grid h-10 w-10 place-items-center rounded-xl bg-warning-soft text-warning">
-                  <AlertTriangle className="h-5 w-5" />
-                </span>
+                {i.photo ? (
+                  <button onClick={() => setPreview(i.photo)} className="shrink-0 overflow-hidden rounded-xl ring-1 ring-border transition hover:ring-primary" aria-label="Fotoğrafı büyüt">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={i.photo} alt={`${i.productName} bildirim fotoğrafı`} className="h-12 w-12 object-cover" />
+                  </button>
+                ) : (
+                  <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-warning-soft text-warning">
+                    <AlertTriangle className="h-5 w-5" />
+                  </span>
+                )}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">{i.productName}</span>
@@ -89,6 +98,10 @@ export default function AdminIssues() {
           })}
         </Card>
       )}
+      <Sheet open={!!preview} onClose={() => setPreview(null)} title="Bildirim fotoğrafı">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {preview && <img src={preview} alt="Bildirim fotoğrafı" className="w-full rounded-2xl" />}
+      </Sheet>
     </div>
   );
 }

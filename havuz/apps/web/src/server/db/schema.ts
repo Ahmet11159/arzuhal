@@ -182,6 +182,8 @@ export const issues = pgTable('issues', {
   type: text('type', { enum: ['missing', 'damaged', 'quality', 'wrong_item'] }).notNull(),
   qty: integer('qty').notNull(),
   note: text('note'),
+  /** Sıkıştırılmış fotoğraf (data URL). Production'da nesne depolamaya (S3/R2) taşınmalı; burada yalnızca URL tutulur. */
+  photo: text('photo'),
   status: text('status', { enum: ['open', 'resolved', 'rejected'] }).notNull().default('open'),
   creditAmount: integer('credit_amount').notNull().default(0),
   createdAt: createdAt(),

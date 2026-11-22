@@ -21,10 +21,17 @@ export const createOrderInput = z.object({
 });
 export type CreateOrderInput = z.input<typeof createOrderInput>;
 
+/** Mal kabul fotoğrafı: istemcide sıkıştırılmış JPEG/PNG/WebP data URL (en fazla ~500 KB). */
+export const issuePhoto = z
+  .string()
+  .max(700_000, 'Fotoğraf çok büyük')
+  .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/, 'Geçersiz fotoğraf biçimi');
+
 export const reportIssueInput = z.object({
   type: z.enum(ISSUE_TYPES),
   qty: z.number().int().min(1),
   note: z.string().trim().max(500).optional(),
+  photo: issuePhoto.optional(),
 });
 export type ReportIssueInput = z.infer<typeof reportIssueInput>;
 

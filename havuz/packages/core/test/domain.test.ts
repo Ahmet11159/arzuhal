@@ -14,6 +14,7 @@ import {
   canTransition,
   createOrderInput,
   updateOfferInput,
+  reportIssueInput,
 } from '../src';
 
 const oil = { basePrice: 100_000, tiers: [{ minQty: 50, unitPrice: 92_000 }, { minQty: 200, unitPrice: 86_000 }] };
@@ -145,6 +146,11 @@ describe('sözleşmeler', () => {
     const ok = createOrderInput.parse({ items: [{ offerId: 'x', qty: 2 }] });
     expect(ok.paymentTerm).toBe('cash');
     expect(ok.waveId).toBeNull();
+  });
+  it('validates issue photos', () => {
+    expect(reportIssueInput.safeParse({ type: 'damaged', qty: 1, photo: 'data:image/jpeg;base64,AAAA' }).success).toBe(true);
+    expect(reportIssueInput.safeParse({ type: 'damaged', qty: 1, photo: 'data:text/html;base64,AAAA' }).success).toBe(false);
+    expect(reportIssueInput.safeParse({ type: 'damaged', qty: 1, photo: 'https://evil.example/x.jpg' }).success).toBe(false);
   });
   it('rejects tiers above base price', () => {
     expect(updateOfferInput.safeParse({ basePrice: 100, tiers: [{ minQty: 10, unitPrice: 120 }] }).success).toBe(false);

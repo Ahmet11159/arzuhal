@@ -131,7 +131,7 @@ export interface OrderItemDTO {
   marketPrice: Kurus;
   vatRate: number;
   status: ItemStatus;
-  issue: { id: string; type: IssueType; status: IssueStatus; qty: number; note: string | null; creditAmount: Kurus } | null;
+  issue: { id: string; type: IssueType; status: IssueStatus; qty: number; note: string | null; creditAmount: Kurus; photo: string | null } | null;
 }
 
 export interface OrderSummaryDTO {
@@ -318,6 +318,7 @@ export interface AdminIssueDTO {
   productName: string;
   unitPrice: Kurus;
   vatRate: number;
+  photo: string | null;
 }
 
 export interface LeadDTO {

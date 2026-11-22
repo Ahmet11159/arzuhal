@@ -7,13 +7,21 @@ Havuz, bağımsız kafe ve restoranların satın alma hacmini birleştirir, teda
 
 Bu klasör, ARZUHAL reposu içinde bağımsız bir monorepodur. ARZUHAL sitesine dokunmaz.
 
-## Hızlı başlangıç
+## Bilgisayarınızda çalıştırma
+
+Gereken tek şey **Node.js 20 veya üzeri** (https://nodejs.org → "LTS" sürümünü kurun).
+Veritabanı kurmanız gerekmez.
 
 ```bash
+git clone https://github.com/Ahmet11159/arzuhal.git
+cd arzuhal
+git checkout claude/bold-hypatia-yv6cka   # PR birleştirildiyse bu adımı atlayın
 cd havuz
 npm install
-npm run dev          # http://localhost:3100
+npm run dev
 ```
+
+Ardından tarayıcıda **http://localhost:3100** adresini açın.
 
 İlk açılışta gömülü veritabanı (PGlite) oluşturulur ve demo verisi otomatik yüklenir.
 Harici bir veritabanı kurmanız gerekmez.

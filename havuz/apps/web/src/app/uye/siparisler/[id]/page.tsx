@@ -32,6 +32,7 @@ import { ErrorState } from '@/components/ui/empty';
 import { useCart } from '@/stores/cart';
 import { fmtDate, fmtDateTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
+import { compressImage } from '@/lib/image';
 
 export default function OrderDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -149,10 +150,16 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
                       </div>
                       {it.issue && (
                         <div className="mt-1.5">
-                          <Badge tone={it.issue.status === 'open' ? 'warning' : it.issue.status === 'resolved' ? 'success' : 'neutral'}>
-                            {ISSUE_TYPE_LABEL[it.issue.type]} · {ISSUE_STATUS_LABEL[it.issue.status]}
-                            {it.issue.creditAmount > 0 && ` · +${formatTRY(it.issue.creditAmount)}`}
-                          </Badge>
+                          <span className="inline-flex items-center gap-2">
+                            {it.issue.photo && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <a href={it.issue.photo} target="_blank" rel="noreferrer"><img src={it.issue.photo} alt="Bildirim fotoğrafı" className="h-8 w-8 rounded-lg object-cover ring-1 ring-border" /></a>
+                            )}
+                            <Badge tone={it.issue.status === 'open' ? 'warning' : it.issue.status === 'resolved' ? 'success' : 'neutral'}>
+                              {ISSUE_TYPE_LABEL[it.issue.type]} · {ISSUE_STATUS_LABEL[it.issue.status]}
+                              {it.issue.creditAmount > 0 && ` · +${formatTRY(it.issue.creditAmount)}`}
+                            </Badge>
+                          </span>
                         </div>
                       )}
                     </div>
@@ -235,6 +242,7 @@ function IssueSheet({ orderId, item, onClose }: { orderId: string; item: OrderIt
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
 
   return (
     <Sheet
@@ -246,10 +254,11 @@ function IssueSheet({ orderId, item, onClose }: { orderId: string; item: OrderIt
           size="lg"
           className="w-full"
           loading={report.isPending}
+          disabled={processing}
           onClick={async () => {
             if (!item) return;
             try {
-              await report.mutateAsync({ itemId: item.id, input: { type, qty, note: [note, photo ? '[fotoğraf eklendi]' : ''].filter(Boolean).join(' ') || undefined } });
+              await report.mutateAsync({ itemId: item.id, input: { type, qty, note: note.trim() || undefined, photo: photo ?? undefined } });
               toast.success('Bildiriminiz alındı', { description: 'Operasyon ekibi inceledikten sonra iade kredinize geçer.' });
               setNote('');
               setPhoto(null);
@@ -305,15 +314,24 @@ function IssueSheet({ orderId, item, onClose }: { orderId: string; item: OrderIt
                 <Camera className="h-5 w-5" />
               </span>
             )}
-            <span>{photo ? 'Fotoğraf eklendi · değiştirmek için dokunun' : 'Fotoğraf ekle (kamera veya galeri)'}</span>
+            <span>{processing ? 'Fotoğraf hazırlanıyor…' : photo ? 'Fotoğraf eklendi · değiştirmek için dokunun' : 'Fotoğraf ekle (kamera veya galeri)'}</span>
             <input
               type="file"
               accept="image/*"
               capture="environment"
               className="sr-only"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const f = e.target.files?.[0];
-                if (f) setPhoto(URL.createObjectURL(f));
+                e.target.value = '';
+                if (!f) return;
+                setProcessing(true);
+                try {
+                  setPhoto(await compressImage(f));
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : 'Fotoğraf eklenemedi');
+                } finally {
+                  setProcessing(false);
+                }
               }}
             />
           </label>

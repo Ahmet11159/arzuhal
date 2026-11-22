@@ -207,6 +207,7 @@ export async function adminIssues(db: DB): Promise<AdminIssueDTO[]> {
     productName: r.productName,
     unitPrice: r.unitPrice,
     vatRate: r.vatRate,
+    photo: r.issue.photo,
   }));
 }
 

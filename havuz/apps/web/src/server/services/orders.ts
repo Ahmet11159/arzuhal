@@ -92,7 +92,7 @@ export function toOrderDetail(o: OrderRow): OrderDetailDTO {
       vatRate: i.vatRate,
       status: i.status,
       issue: i.issue
-        ? { id: i.issue.id, type: i.issue.type, status: i.issue.status, qty: i.issue.qty, note: i.issue.note, creditAmount: i.issue.creditAmount }
+        ? { id: i.issue.id, type: i.issue.type, status: i.issue.status, qty: i.issue.qty, note: i.issue.note, creditAmount: i.issue.creditAmount, photo: i.issue.photo }
         : null,
     })),
   };
@@ -305,7 +305,7 @@ export async function reportIssue(db: DB, session: SessionPayload, orderId: stri
   if (item.status !== 'delivered') throw badRequest('Sorun bildirimi yalnızca teslim edilen ürünler için yapılabilir');
   if (item.issue) throw badRequest('Bu ürün için zaten bir bildirim var');
   if (input.qty > item.qty) throw badRequest(`En fazla ${item.qty} adet bildirebilirsiniz`);
-  await db.insert(s.issues).values({ orderItemId: itemId, type: input.type, qty: input.qty, note: input.note ?? null });
+  await db.insert(s.issues).values({ orderItemId: itemId, type: input.type, qty: input.qty, note: input.note ?? null, photo: input.photo ?? null });
 }
 
 export async function payOrder(db: DB, session: SessionPayload, orderId: string) {
