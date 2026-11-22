@@ -1,8 +1,10 @@
 import bcrypt from 'bcryptjs';
-import { sql } from 'drizzle-orm';
+import { inArray, sql } from 'drizzle-orm';
 import {
   closeWave,
   computeOrderTotals,
+  computeSettlement,
+  formatSettlementNumber,
   dueDate,
   formatOrderNumber,
   resolveTier,
@@ -170,6 +172,15 @@ const slug = (t: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '');
 
+/** Geçerli kontrol haneli demo TR IBAN üretir (banka kodu 00062 + rastgele hesap). */
+function demoIban(rand: () => number): string {
+  const bban = '00062' + '0' + Array.from({ length: 16 }, () => Math.floor(rand() * 10)).join('');
+  const numeric = bban + '2927' + '00';
+  let rem = 0;
+  for (const ch of numeric) rem = (rem * 10 + Number(ch)) % 97;
+  return `TR${String(98 - rem).padStart(2, '0')}${bban}`;
+}
+
 async function insertChunks<T extends object>(db: DB, table: Parameters<DB['insert']>[0], rows: T[], size = 400) {
   for (let i = 0; i < rows.length; i += size) {
     await db.insert(table).values(rows.slice(i, i + size) as never);
@@ -178,7 +189,7 @@ async function insertChunks<T extends object>(db: DB, table: Parameters<DB['inse
 
 export async function resetDatabase(db: DB) {
   await db.execute(
-    sql`TRUNCATE TABLE ${s.issues}, ${s.ledgerEntries}, ${s.orderItems}, ${s.orders}, ${s.waves}, ${s.offers}, ${s.products}, ${s.categories}, ${s.subscriptions}, ${s.leads}, ${s.users}, ${s.organizations} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE ${s.auditLogs}, ${s.outbox}, ${s.notifications}, ${s.passwordResets}, ${s.payments}, ${s.settlements}, ${s.issues}, ${s.ledgerEntries}, ${s.orderItems}, ${s.orders}, ${s.waves}, ${s.offers}, ${s.products}, ${s.categories}, ${s.subscriptions}, ${s.leads}, ${s.users}, ${s.organizations} RESTART IDENTITY CASCADE`,
   );
 }
 
@@ -195,7 +206,7 @@ export async function seed(db: DB, now: Date = new Date()) {
     { id: operatorId, type: 'operator', name: 'Havuz Operasyon', city: 'İstanbul', district: 'Kadıköy', createdAt: new Date(t0 - 220 * DAY) },
   ];
   const userRows: (typeof s.users.$inferInsert)[] = [
-    { orgId: operatorId, name: 'Operasyon Ekibi', email: DEMO_ACCOUNTS.admin, passwordHash, role: 'admin' },
+    { orgId: operatorId, name: 'Operasyon Ekibi', email: DEMO_ACCOUNTS.admin, passwordHash, role: 'admin', isOwner: true },
   ];
 
   const supplierIds: Record<string, string> = {};
@@ -210,11 +221,14 @@ export async function seed(db: DB, now: Date = new Date()) {
       district: sp.district,
       taxNo: String(1000000000 + Math.floor(rand() * 8999999999)).slice(0, 10),
       commissionBps: sp.commissionBps,
+      iban: demoIban(rand),
+      email: sp.email ?? `satis@${slug(sp.name)}.demo`,
+      phone: `0212 555 ${String(10 + Math.floor(rand() * 89))} ${String(10 + Math.floor(rand() * 89))}`,
       rating: sp.rating,
       onTimeRate: sp.onTimeRate,
       createdAt: new Date(t0 - 210 * DAY),
     });
-    userRows.push({ orgId: id, name: `${sp.name} Satış`, email: sp.email ?? `satis@${slug(sp.name)}.demo`, passwordHash, role: 'supplier' });
+    userRows.push({ orgId: id, name: `${sp.name} Satış`, email: sp.email ?? `satis@${slug(sp.name)}.demo`, passwordHash, role: 'supplier', isOwner: true });
   }
 
   const memberIds: string[] = [];
@@ -231,9 +245,11 @@ export async function seed(db: DB, now: Date = new Date()) {
       taxNo: String(2000000000 + Math.floor(rand() * 7999999999)).slice(0, 10),
       plan: m.plan,
       creditLimit: L(m.creditLimit),
+      email: m.email ?? `iletisim@${slug(m.name)}.demo`,
+      phone: `0532 555 ${String(10 + Math.floor(rand() * 89))} ${String(10 + Math.floor(rand() * 89))}`,
       createdAt: new Date(t0 - (200 - i * 6) * DAY),
     });
-    userRows.push({ orgId: id, name: `${m.name} Yönetici`, email: m.email ?? `iletisim@${slug(m.name)}.demo`, passwordHash, role: 'member' });
+    userRows.push({ orgId: id, name: `${m.name} Yönetici`, email: m.email ?? `iletisim@${slug(m.name)}.demo`, passwordHash, role: 'member', isOwner: true });
   });
 
   await db.insert(s.organizations).values(orgRows);
@@ -367,6 +383,8 @@ export async function seed(db: DB, now: Date = new Date()) {
     commissionBps: number;
     status: 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
     updatedAt: Date;
+    deliveredAt?: Date | null;
+    settlementId?: string | null;
   }
   interface OrderDraft {
     id: string;
@@ -552,6 +570,8 @@ export async function seed(db: DB, now: Date = new Date()) {
       shippedAt: minIdx >= 2 ? new Date(c + 26 * 3600_000) : null,
       deliveredAt: minIdx >= 3 ? new Date(c + (d.waveIdx === null ? 30 : 60) * 3600_000) : null,
     });
+    const deliveredAt = minIdx >= 3 ? new Date(c + (d.waveIdx === null ? 30 : 60) * 3600_000) : null;
+    for (const it of d.items) it.deliveredAt = it.status === 'delivered' ? deliveredAt ?? new Date(c + 48 * 3600_000) : null;
     allItems.push(...d.items);
     const credit = creditByOrder[d.id];
     if (credit) {
@@ -620,6 +640,85 @@ export async function seed(db: DB, now: Date = new Date()) {
     }
   });
   await insertChunks(db, s.ledgerEntries, ledger);
+
+  // --- Hakedişler: 14 günden eski teslimatlar aylık hakedişlerle ödenmiş olsun ---
+  const settleBefore = t0 - 14 * DAY;
+  const monthEnd = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+  const groups = new Map<string, ItemRow[]>();
+  for (const it of allItems) {
+    if (it.status !== 'delivered' || !it.deliveredAt || it.deliveredAt.getTime() > settleBefore) continue;
+    const end = monthEnd(it.deliveredAt);
+    if (end.getTime() > settleBefore) continue; // içinde bulunulan ay henüz kapanmadı
+    const key = `${it.supplierId}|${end.toISOString()}`;
+    (groups.get(key) ?? groups.set(key, []).get(key)!).push(it);
+  }
+  const issueByItem = new Map(issueRows.filter((i) => i.status === 'resolved').map((i) => [i.orderItemId, i]));
+  let settlementSeq = 0;
+  const sortedKeys = [...groups.keys()].sort((a, b) => a.split('|')[1].localeCompare(b.split('|')[1]));
+  for (const key of sortedKeys) {
+    const items = groups.get(key)!;
+    const [supplierId, endIso] = key.split('|');
+    const periodEnd = new Date(endIso);
+    const issuesHere = items.map((it) => issueByItem.get(it.id)).filter(Boolean) as (typeof s.issues.$inferInsert)[];
+    const t = computeSettlement(items, issuesHere.map((i) => i.creditAmount ?? 0));
+    const id = crypto.randomUUID();
+    const paidAt = new Date(periodEnd.getTime() + 5 * DAY);
+    settlementSeq++;
+    const sup = orgRows.find((o) => o.id === supplierId)!;
+    await db.insert(s.settlements).values({
+      id,
+      number: formatSettlementNumber(settlementSeq, periodEnd.getFullYear()),
+      supplierId,
+      periodEnd,
+      itemCount: t.itemCount,
+      grossSales: t.grossSales,
+      commission: t.commission,
+      issueDeductions: t.issueDeductions,
+      netAmount: t.netAmount,
+      status: paidAt.getTime() < t0 ? 'paid' : 'pending',
+      reference: paidAt.getTime() < t0 ? `EFT${String(100000 + Math.floor(rand() * 899999))}` : null,
+      iban: sup.iban ?? null,
+      createdAt: new Date(periodEnd.getTime() + 2 * DAY),
+      paidAt: paidAt.getTime() < t0 ? paidAt : null,
+    });
+    const ids = items.map((i) => i.id);
+    for (let k = 0; k < ids.length; k += 300) {
+      await db.update(s.orderItems).set({ settlementId: id }).where(inArray(s.orderItems.id, ids.slice(k, k + 300)));
+    }
+    const issueIds = issuesHere.map((i) => i.orderItemId as string);
+    if (issueIds.length) await db.update(s.issues).set({ settlementId: id }).where(inArray(s.issues.orderItemId, issueIds));
+  }
+  // Kimlik sırası, elle verilen numaralarla çakışmasın
+  await db.execute(sql`SELECT setval(pg_get_serial_sequence('settlements', 'seq'), ${settlementSeq + 1}, false)`);
+
+  // --- Kartla ödenen peşin siparişler için ödeme kayıtları (son 60 gün) ---
+  const paymentRows: (typeof s.payments.$inferInsert)[] = orderRows
+    .filter((o) => o.paymentTerm === 'cash' && (o.createdAt as Date).getTime() > t0 - 60 * DAY)
+    .map((o) => ({
+      orgId: o.memberId,
+      purpose: 'order' as const,
+      orderId: o.id,
+      amount: o.total,
+      provider: 'test',
+      status: 'succeeded' as const,
+      providerPaymentId: `test_${(o.id as string).slice(0, 8)}`,
+      cardLast4: '4242',
+      createdAt: o.createdAt,
+      completedAt: new Date((o.createdAt as Date).getTime() + 60_000),
+    }));
+  if (paymentRows.length) await insertChunks(db, s.payments, paymentRows);
+
+  // --- Örnek bildirimler ---
+  const lastClosed = waveRows.filter((w) => w.status !== 'open').at(-1);
+  const demoMember = memberIds[0];
+  const demoSupplier = supplierIds['anadolu'];
+  await db.insert(s.notifications).values([
+    { orgId: demoMember, type: 'wave.opened', title: `${waveRows.at(-1)!.title} açıldı`, body: 'Sipariş alımı perşembe 18:00’e kadar açık. Havuz büyüdükçe fiyatlar düşer.', link: '/uye/dalga', createdAt: waveRows.at(-1)!.opensAt },
+    ...(lastClosed
+      ? [{ orgId: demoMember, type: 'wave.rebate', title: `${lastClosed.title} kapandı`, body: 'Havuz büyüdüğü için nihai fiyat düştü; fark kredi bakiyenize eklendi.', link: '/uye/hesap', createdAt: lastClosed.cutoffAt, readAt: lastClosed.cutoffAt }]
+      : []),
+    { orgId: demoSupplier, type: 'settlement.paid', title: 'Hakediş ödendi', body: 'Geçen ayın hakedişi hesabınıza gönderildi.', link: '/tedarikci/hakedis', createdAt: new Date(t0 - 10 * DAY), readAt: new Date(t0 - 9 * DAY) },
+  ]);
 
   // --- Pro abonelik faturaları (son 6 ay) ---
   const subs: (typeof s.subscriptions.$inferInsert)[] = [];

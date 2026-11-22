@@ -1,9 +1,9 @@
 import 'server-only';
-import { and, desc, eq, gt, inArray, notInArray, sql } from 'drizzle-orm';
-import { PRO_MONTHLY_FEE, type AccountDTO, type MemberDashboardDTO } from '@havuz/core';
+import { and, desc, eq, gt, inArray, notInArray } from 'drizzle-orm';
+import { type AccountDTO, type MemberDashboardDTO } from '@havuz/core';
 import type { DB } from '../db/client';
 import * as s from '../db/schema';
-import { badRequest, notFound } from '../http';
+import { notFound } from '../http';
 import type { SessionPayload } from '../auth/secret';
 import { activeWaveDTO, creditBalance, DAY, itemFacts, lastMonths, median, monthKey, outstanding } from './common';
 import { toOrderSummary } from './orders';
@@ -122,7 +122,7 @@ export async function memberAccount(db: DB, session: SessionPayload): Promise<Ac
   const months = lastMonths(6).reverse();
   const invoices = months.map((m) => {
     const rows = all.filter((o) => monthKey(o.createdAt) === m.key);
-    return { month: m.label, orderCount: rows.length, total: rows.reduce((a, r) => a + r.total, 0), vat: rows.reduce((a, r) => a + r.vat, 0) };
+    return { key: m.key, month: m.label, orderCount: rows.length, total: rows.reduce((a, r) => a + r.total, 0), vat: rows.reduce((a, r) => a + r.vat, 0) };
   });
 
   return {
@@ -142,18 +142,4 @@ export async function memberAccount(db: DB, session: SessionPayload): Promise<Ac
     dueOrders: due.map((o) => toOrderSummary(o)),
     invoices,
   };
-}
-
-export async function upgradeToPro(db: DB, session: SessionPayload) {
-  await db.transaction(async (tx) => {
-    // Koşullu güncelleme: yalnızca 'free' plandan geçiş yapılır; çift tıklama iki abonelik yazmaz.
-    const [org] = await tx
-      .update(s.organizations)
-      .set({ plan: 'pro', creditLimit: sql`greatest(${s.organizations.creditLimit}, 25000000)` })
-      .where(and(eq(s.organizations.id, session.org), eq(s.organizations.type, 'member'), eq(s.organizations.plan, 'free')))
-      .returning({ id: s.organizations.id });
-    if (!org) throw badRequest('Zaten Pro üyesiniz');
-    const now = new Date();
-    await tx.insert(s.subscriptions).values({ orgId: org.id, amount: PRO_MONTHLY_FEE, periodStart: new Date(now.getFullYear(), now.getMonth(), 1) });
-  });
 }

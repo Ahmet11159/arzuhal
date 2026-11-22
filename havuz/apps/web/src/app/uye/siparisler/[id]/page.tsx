@@ -17,7 +17,12 @@ import {
   type IssueType,
   type OrderItemDTO,
 } from '@havuz/core';
-import { useConfirmDelivery, useOrder, useReportIssue } from '@havuz/sdk';
+import { useCancelOrder, useConfirmDelivery, useOrder, useReportIssue } from '@havuz/sdk';
+import { Suspense } from 'react';
+import { Clock, CreditCard } from 'lucide-react';
+import { Countdown } from '@/components/ui/countdown';
+import { usePay } from '@/components/payment/use-pay';
+import { PaymentResultToast } from '@/components/payment/payment-result-toast';
 import { PageHeader } from '@/components/app/page-header';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -40,6 +45,8 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   const receive = useConfirmDelivery(params.id);
   const [issueItem, setIssueItem] = useState<OrderItemDTO | null>(null);
   const addToCart = useCart((s) => s.add);
+  const payment = usePay();
+  const cancel = useCancelOrder();
 
   if (isLoading) return <PageSkeleton />;
   if (error || !data) return <ErrorState message={error?.message ?? 'Sipariş bulunamadı'} onRetry={() => refetch()} />;
@@ -53,6 +60,9 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
 
   return (
     <div className="space-y-6">
+      <Suspense>
+        <PaymentResultToast />
+      </Suspense>
       <Link href="/uye/siparisler" className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg">
         <ArrowLeft className="h-4 w-4" /> Siparişler
       </Link>
@@ -90,6 +100,42 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
           </>
         }
       />
+
+      {o.paymentDeadline && (
+        <Card className="border-warning/40 bg-gradient-to-r from-warning-soft to-surface">
+          <CardBody className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-warning text-white">
+                <Clock className="h-5 w-5" />
+              </span>
+              <div>
+                <div className="font-semibold">Ödeme bekleniyor · {formatTRY(o.total)}</div>
+                <p className="mt-0.5 text-sm text-fg-muted">Stok sizin için ayrıldı. Süre dolarsa sipariş otomatik iptal edilir ve kullandığınız kredi iade edilir. Tedarikçi siparişi ödemeden sonra görür.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Countdown to={o.paymentDeadline} compact />
+              <Button onClick={() => payment.pay({ purpose: 'order', orderId: o.id })} loading={payment.pending}>
+                <CreditCard className="h-4 w-4" /> Şimdi öde
+              </Button>
+              <Button
+                variant="ghost"
+                loading={cancel.isPending}
+                onClick={async () => {
+                  try {
+                    await cancel.mutateAsync(o.id);
+                    toast.success('Sipariş iptal edildi');
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : 'İptal edilemedi');
+                  }
+                }}
+              >
+                İptal et
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       {/* Durum zaman çizelgesi */}
       <Card>

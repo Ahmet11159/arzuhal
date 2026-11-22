@@ -15,15 +15,25 @@ import { Sheet } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/empty';
 import { cn } from '@/lib/cn';
+import { NewOfferSheet } from '@/components/catalog/new-offer-sheet';
 
 export default function OffersPage() {
   const { data, isLoading, error, refetch } = useSupplierOffers();
   const [edit, setEdit] = useState<SupplierOfferDTO | null>(null);
+  const [adding, setAdding] = useState(false);
   const update = useUpdateOffer();
 
   return (
     <div>
-      <PageHeader title="Teklifler" description="Fiyat, kademe ve stok bilgilerinizi güncelleyin. Değişiklikler katalogda anında görünür." />
+      <PageHeader
+        title="Teklifler"
+        description="Fiyat, kademe ve stok bilgilerinizi güncelleyin. Değişiklikler katalogda anında görünür."
+        action={
+          <Button onClick={() => setAdding(true)}>
+            <Plus className="h-4 w-4" /> Yeni teklif
+          </Button>
+        }
+      />
       {error ? (
         <ErrorState message={error.message} onRetry={() => refetch()} />
       ) : isLoading ? (
@@ -106,6 +116,7 @@ export default function OffersPage() {
         </Card>
       )}
       <OfferEditor offer={edit} onClose={() => setEdit(null)} />
+      <NewOfferSheet open={adding} onClose={() => setAdding(false)} />
     </div>
   );
 }

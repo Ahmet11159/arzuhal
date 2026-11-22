@@ -21,7 +21,13 @@ export interface SessionPayload {
   sub: string;
   org: string;
   role: Role;
+  /** Token sürümü: şifre değişince artar, eski token'lar geçersizleşir. */
+  tv: number;
+  /** Geçici şifre: kullanıcı şifresini değiştirene kadar yalnızca şifre değiştirme yapılabilir. */
+  mcp: boolean;
 }
+
+export const CHANGE_PASSWORD_PATH = '/sifre-degistir';
 
 /** Rol → uygulama alanı. */
 export const ROLE_HOME: Record<Role, string> = {

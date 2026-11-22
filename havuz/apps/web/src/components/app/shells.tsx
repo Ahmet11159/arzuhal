@@ -3,6 +3,10 @@
 import type { ReactNode } from 'react';
 import {
   AlertTriangle,
+  Banknote,
+  BookOpen,
+  History,
+  Settings,
   ClipboardList,
   Inbox,
   LayoutDashboard,
@@ -22,12 +26,15 @@ const MEMBER_NAV: NavItem[] = [
   { href: '/uye/dalga', label: 'Dalga', icon: Waves, mobile: true },
   { href: '/uye/siparisler', label: 'Siparişler', icon: ShoppingBag, mobile: true },
   { href: '/uye/hesap', label: 'Hesap', icon: UserRound, mobile: true },
+  { href: '/uye/ayarlar', label: 'Ayarlar', icon: Settings },
 ];
 
 const SUPPLIER_NAV: NavItem[] = [
   { href: '/tedarikci', label: 'Özet', icon: LayoutDashboard, mobile: true, exact: true },
   { href: '/tedarikci/siparisler', label: 'Siparişler', icon: ClipboardList, mobile: true },
   { href: '/tedarikci/teklifler', label: 'Teklifler', icon: Tags, mobile: true },
+  { href: '/tedarikci/hakedis', label: 'Hakedişler', icon: Banknote, mobile: true },
+  { href: '/tedarikci/ayarlar', label: 'Ayarlar', icon: Settings, mobile: true },
 ];
 
 const ADMIN_NAV: NavItem[] = [
@@ -35,8 +42,12 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/yonetim/dalgalar', label: 'Dalgalar', icon: Waves, mobile: true },
   { href: '/yonetim/uyeler', label: 'Üyeler', icon: Store, mobile: true },
   { href: '/yonetim/tedarikciler', label: 'Tedarikçiler', icon: Truck },
+  { href: '/yonetim/katalog', label: 'Katalog', icon: BookOpen },
+  { href: '/yonetim/hakedis', label: 'Hakedişler', icon: Banknote, mobile: true },
   { href: '/yonetim/sorunlar', label: 'Mal kabul', icon: AlertTriangle, mobile: true },
-  { href: '/yonetim/basvurular', label: 'Başvurular', icon: Inbox, mobile: true },
+  { href: '/yonetim/basvurular', label: 'Başvurular', icon: Inbox },
+  { href: '/yonetim/kayitlar', label: 'Kayıtlar', icon: History },
+  { href: '/yonetim/ayarlar', label: 'Ayarlar', icon: Settings },
 ];
 
 export const MemberShell = ({ children }: { children: ReactNode }) => (

@@ -12,6 +12,7 @@ import { useCartCount } from '@/stores/cart';
 import { Logo } from '../ui/logo';
 import { Badge } from '../ui/badge';
 import { ThemeToggle } from './theme-toggle';
+import { NotificationBell } from './notification-bell';
 
 export interface NavItem {
   href: string;
@@ -87,9 +88,12 @@ export function AppShell({ nav, children, areaLabel, showCart }: { nav: NavItem[
     <div className="min-h-dvh">
       {/* Masaüstü kenar çubuğu */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-border bg-surface/60 px-3 py-4 backdrop-blur-xl lg:flex">
-        <div className="px-2">
-          <Logo href={nav[0]?.href ?? '/'} />
-          <div className="mt-1.5 pl-[42px] text-[11px] font-medium uppercase tracking-wider text-fg-subtle">{areaLabel}</div>
+        <div className="flex items-start justify-between px-2">
+          <div>
+            <Logo href={nav[0]?.href ?? '/'} />
+            <div className="mt-1.5 pl-[42px] text-[11px] font-medium uppercase tracking-wider text-fg-subtle">{areaLabel}</div>
+          </div>
+          <NotificationBell align="left" />
         </div>
         <nav className="mt-7 flex-1 space-y-0.5" aria-label="Ana menü">
           {nav.map((item) => {
@@ -134,6 +138,7 @@ export function AppShell({ nav, children, areaLabel, showCart }: { nav: NavItem[
       <header className="glass sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border px-4 lg:hidden">
         <Logo href={nav[0]?.href ?? '/'} />
         <div className="flex items-center gap-1">
+          <NotificationBell />
           {showCart && <CartButton />}
           <ThemeToggle />
           <button onClick={doLogout} className="grid h-9 w-9 place-items-center rounded-xl text-fg-muted hover:bg-muted" aria-label="Çıkış yap">

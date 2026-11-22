@@ -2,9 +2,12 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import { ZodError, type ZodTypeAny, type z } from 'zod';
 import type { ApiErrorBody } from '@havuz/core';
+import { and, eq } from 'drizzle-orm';
 import { getDb, type DB } from './db/client';
+import * as schema from './db/schema';
 import { readSession } from './auth/session';
 import type { Role, SessionPayload } from './auth/secret';
+import type { Actor } from './audit';
 
 export class AppError extends Error {
   constructor(
@@ -40,6 +43,8 @@ interface Ctx<P> {
   req: Request;
   params: P;
   db: DB;
+  /** İşlem kaydı için: kim, hangi IP'den. */
+  actor: Actor;
 }
 interface AuthedCtx<P> extends Ctx<P> {
   session: SessionPayload;
@@ -52,7 +57,7 @@ export function publicRoute<P = Record<string, string>>(fn: (ctx: Ctx<P>) => Pro
   return async (req: Request, { params }: RouteCtx<P>) => {
     try {
       const db = await getDb();
-      const out = await fn({ req, params, db });
+      const out = await fn({ req, params, db, actor: { ip: clientIp(req) } });
       return out instanceof Response ? out : NextResponse.json(out);
     } catch (e) {
       return errorResponse(e);
@@ -60,15 +65,39 @@ export function publicRoute<P = Record<string, string>>(fn: (ctx: Ctx<P>) => Pro
   };
 }
 
-/** Oturum ve rol kontrollü uç nokta. */
-export function route<P = Record<string, string>>(roles: Role[], fn: (ctx: AuthedCtx<P>) => Promise<unknown>) {
+/**
+ * Oturum ve rol kontrollü uç nokta. Her istekte kullanıcının ve kuruluşunun hâlâ aktif
+ * olduğu ve token sürümünün güncel olduğu veritabanından doğrulanır (çıkış/şifre değişimi
+ * sonrası eski token'lar anında geçersizdir).
+ */
+export function route<P = Record<string, string>>(
+  roles: Role[],
+  fn: (ctx: AuthedCtx<P>) => Promise<unknown>,
+  opts: { allowMustChange?: boolean } = {},
+) {
   return async (req: Request, { params }: RouteCtx<P>) => {
     try {
       const session = await readSession();
       if (!session) throw new AppError(401, 'unauthorized', 'Oturum açmanız gerekiyor');
       if (!roles.includes(session.role)) throw forbidden();
       const db = await getDb();
-      const out = await fn({ req, params, db, session });
+      const [u] = await db
+        .select({
+          tv: schema.users.tokenVersion,
+          active: schema.users.active,
+          orgActive: schema.organizations.active,
+          mcp: schema.users.mustChangePassword,
+          name: schema.users.name,
+          orgName: schema.organizations.name,
+        })
+        .from(schema.users)
+        .innerJoin(schema.organizations, eq(schema.organizations.id, schema.users.orgId))
+        .where(and(eq(schema.users.id, session.sub), eq(schema.users.orgId, session.org)));
+      if (!u || u.tv !== session.tv) throw new AppError(401, 'session_expired', 'Oturumunuz sona erdi, lütfen tekrar giriş yapın');
+      if (!u.active || !u.orgActive) throw new AppError(403, 'account_disabled', 'Hesabınız pasif durumda. Havuz destek ekibiyle iletişime geçin.');
+      if (u.mcp && !opts.allowMustChange) throw new AppError(403, 'password_change_required', 'Devam etmek için önce şifrenizi değiştirin');
+      const actor: Actor = { userId: session.sub, orgId: session.org, name: `${u.name} (${u.orgName})`, ip: clientIp(req) };
+      const out = await fn({ req, params, db, session, actor });
       return out instanceof Response ? out : NextResponse.json(out);
     } catch (e) {
       return errorResponse(e);

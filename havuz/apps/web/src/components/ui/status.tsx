@@ -21,7 +21,7 @@ export function OrderStatusBadge({ status }: { status: OrderStatus }) {
   );
 }
 
-const PAY_TONE: Record<PaymentStatus, BadgeTone> = { paid: 'success', due: 'info', overdue: 'danger' };
+const PAY_TONE: Record<PaymentStatus, BadgeTone> = { unpaid: 'warning', paid: 'success', due: 'info', overdue: 'danger' };
 export function PaymentBadge({ status }: { status: PaymentStatus }) {
   return (
     <Badge tone={PAY_TONE[status]}>

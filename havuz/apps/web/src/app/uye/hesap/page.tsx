@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { toast } from 'sonner';
 import { Building2, Check, Crown, FileText, Gift, MapPin, MinusCircle, PiggyBank, Receipt, Wallet } from 'lucide-react';
 import {
   BUSINESS_TYPE_LABEL,
@@ -12,7 +11,11 @@ import {
   PLAN_LABEL,
   PRO_MONTHLY_FEE,
 } from '@havuz/core';
-import { useAccount, usePayOrder, useUpgrade } from '@havuz/sdk';
+import { useAccount } from '@havuz/sdk';
+import { Suspense } from 'react';
+import { ChevronRight } from 'lucide-react';
+import { usePay } from '@/components/payment/use-pay';
+import { PaymentResultToast } from '@/components/payment/payment-result-toast';
 import { PageHeader } from '@/components/app/page-header';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,15 +28,17 @@ import { fmtDate } from '@/lib/format';
 
 export default function AccountPage() {
   const { data, isLoading, error, refetch } = useAccount();
-  const pay = usePayOrder();
-  const upgrade = useUpgrade();
+  const payment = usePay();
   if (isLoading) return <PageSkeleton />;
   if (error || !data) return <ErrorState message={error?.message ?? 'Yüklenemedi'} onRetry={() => refetch()} />;
   const usage = data.org.creditLimit ? data.outstanding / data.org.creditLimit : 0;
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Hesap" description="Kredi bakiyeniz, vadeli ödemeleriniz, aylık konsolide faturanız ve üyeliğiniz." />
+      <Suspense>
+        <PaymentResultToast />
+      </Suspense>
+      <PageHeader title="Hesap" description="Kredi bakiyeniz, vadeli ödemeleriniz, aylık hesap özetiniz ve üyeliğiniz." />
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-1">
@@ -103,17 +108,10 @@ export default function AccountPage() {
                     <Button
                       size="sm"
                       variant={o.paymentStatus === 'overdue' ? 'danger' : 'secondary'}
-                      loading={pay.isPending && pay.variables === o.id}
-                      onClick={async () => {
-                        try {
-                          await pay.mutateAsync(o.id);
-                          toast.success(`${o.number} ödendi`);
-                        } catch (e) {
-                          toast.error(e instanceof Error ? e.message : 'Ödeme başarısız');
-                        }
-                      }}
+                      loading={payment.pending && payment.variables?.orderId === o.id}
+                      onClick={() => payment.pay({ purpose: 'due', orderId: o.id })}
                     >
-                      Öde
+                      Kartla öde
                     </Button>
                   </li>
                 ))}
@@ -122,7 +120,7 @@ export default function AccountPage() {
           </Card>
 
           <Card className="overflow-hidden">
-            <CardHeader title="Aylık konsolide fatura" description="Tüm tedarikçilerden alımlarınız tek e-faturada" />
+            <CardHeader title="Aylık hesap özeti" description="Tüm tedarikçilerden alımlarınız tek belgede; yazdırılabilir ve muhasebe için CSV" />
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[420px] text-sm">
                 <thead>
@@ -144,7 +142,11 @@ export default function AccountPage() {
                       </td>
                       <td className="px-3 py-3 text-right tabular text-fg-muted">{inv.orderCount}</td>
                       <td className="px-3 py-3 text-right tabular text-fg-muted">{formatTRY(inv.vat)}</td>
-                      <td className="px-5 py-3 text-right font-semibold tabular">{formatTRY(inv.total)}</td>
+                      <td className="px-5 py-3 text-right font-semibold tabular">
+                        <Link href={`/uye/hesap/ozet/${inv.key}`} className="inline-flex items-center gap-1 hover:text-primary">
+                          {formatTRY(inv.total)} <ChevronRight className="h-4 w-4 text-fg-subtle" />
+                        </Link>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -177,15 +179,8 @@ export default function AccountPage() {
                   <Button
                     variant="accent"
                     className="mt-5 w-full"
-                    loading={upgrade.isPending}
-                    onClick={async () => {
-                      try {
-                        await upgrade.mutateAsync();
-                        toast.success('Pro üyeliğiniz aktif', { description: 'Yeni vade seçenekleri sepette kullanılabilir.' });
-                      } catch (e) {
-                        toast.error(e instanceof Error ? e.message : 'Hata');
-                      }
-                    }}
+                    loading={payment.pending && payment.variables?.purpose === 'subscription'}
+                    onClick={() => payment.pay({ purpose: 'subscription' })}
                   >
                     Pro’ya geç · {formatTRY(PRO_MONTHLY_FEE)}/ay
                   </Button>

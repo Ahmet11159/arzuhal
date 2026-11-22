@@ -30,6 +30,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { QtyStepper } from '@/components/app/qty-stepper';
 import { offerUnitPrice } from '@/components/catalog/pricing';
 import { useCart } from '@/stores/cart';
+import { usePay } from '@/components/payment/use-pay';
 import { cn } from '@/lib/cn';
 
 interface Line {
@@ -49,7 +50,8 @@ export default function CartPage() {
   const [term, setTerm] = useState<PaymentTerm>('cash');
   const [useCredit, setUseCredit] = useState(true);
   const [note, setNote] = useState('');
-  const [done, setDone] = useState<{ id: string; number: string } | null>(null);
+  const [done, setDone] = useState<{ id: string; number: string; paying: boolean } | null>(null);
+  const payment = usePay();
 
   const plan = me.data?.user.org.plan ?? 'free';
   const credit = account.data?.creditBalance ?? 0;
@@ -107,8 +109,15 @@ export default function CartPage() {
         note: note.trim() || undefined,
       });
       clear();
-      setDone({ id: r.order.id, number: r.order.number });
-      setTimeout(() => router.push(`/uye/siparisler/${r.order.id}`), 1800);
+      if (r.order.paymentStatus === 'unpaid') {
+        // Peşin sipariş: stok ayrıldı, kart ödemesine yönlendir (30 dk içinde ödenmezse iptal).
+        setDone({ id: r.order.id, number: r.order.number, paying: true });
+        await payment.pay({ purpose: 'order', orderId: r.order.id });
+        if (!payment.pending) setTimeout(() => router.push(`/uye/siparisler/${r.order.id}`), 1200);
+      } else {
+        setDone({ id: r.order.id, number: r.order.number, paying: false });
+        setTimeout(() => router.push(`/uye/siparisler/${r.order.id}`), 1800);
+      }
     } catch (e) {
       toast.error('Sipariş oluşturulamadı', { description: e instanceof ApiError ? e.message : 'Lütfen tekrar deneyin' });
     }
@@ -124,9 +133,9 @@ export default function CartPage() {
               <CheckCircle2 className="h-12 w-12" />
             </span>
           </motion.div>
-          <h1 className="mt-6 text-2xl font-semibold">Siparişiniz alındı</h1>
+          <h1 className="mt-6 text-2xl font-semibold">{done.paying ? 'Siparişiniz oluşturuldu' : 'Siparişiniz alındı'}</h1>
           <p className="mt-1 font-mono text-sm text-fg-muted">{done.number}</p>
-          <p className="mt-3 text-sm text-fg-muted">Sipariş detayına yönlendiriliyorsunuz…</p>
+          <p className="mt-3 text-sm text-fg-muted">{done.paying ? 'Güvenli ödeme sayfasına yönlendiriliyorsunuz…' : 'Sipariş detayına yönlendiriliyorsunuz…'}</p>
         </motion.div>
       </div>
     );
@@ -292,10 +301,14 @@ export default function CartPage() {
                     <Info className="h-4 w-4 shrink-0" />
                     Piyasa fiyatına göre <b className="tabular">{formatTRY(totals.savings)}</b> tasarruf
                   </div>
-                  <Button size="lg" className="mt-2 w-full" onClick={placeOrder} loading={create.isPending} disabled={!resolved.lines.length}>
-                    {mode === 'wave' && activeWave ? 'Dalgaya katıl ve sipariş ver' : 'Siparişi onayla'}
+                  <Button size="lg" className="mt-2 w-full" onClick={placeOrder} loading={create.isPending || payment.pending} disabled={!resolved.lines.length}>
+                    {term === 'cash' && totals.total > 0 ? 'Siparişi onayla ve öde' : mode === 'wave' && activeWave ? 'Dalgaya katıl ve sipariş ver' : 'Siparişi onayla'}
                   </Button>
-                  <p className="text-center text-[11px] text-fg-subtle">Fiyatlar sunucuda yeniden doğrulanır. Dalgada nihai kademe kapanışta belirlenir.</p>
+                  <p className="text-center text-[11px] text-fg-subtle">
+                    {term === 'cash' && totals.total > 0
+                      ? 'Sonraki adımda kartla güvenli ödeme yapılır; ödeme 30 dakika içinde tamamlanmazsa sipariş iptal edilir.'
+                      : 'Fiyatlar sunucuda yeniden doğrulanır. Dalgada nihai kademe kapanışta belirlenir.'}
+                  </p>
                 </CardBody>
               </Card>
             )}

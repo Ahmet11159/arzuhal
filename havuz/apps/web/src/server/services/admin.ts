@@ -13,6 +13,10 @@ import type { DB } from '../db/client';
 import * as s from '../db/schema';
 import { badRequest, notFound } from '../http';
 import { activeWaveDTO, DAY, itemFacts, lastMonths, monthKey, type ItemFact } from './common';
+import { audit, type Actor } from '../audit';
+import { notify } from '../notify';
+import { formatTRY, computeSettlement } from '@havuz/core';
+import { isNull } from 'drizzle-orm';
 
 const volume = (fs: ItemFact[]) => fs.reduce((a, f) => a + f.qty * f.finalUnitPrice, 0);
 const commission = (fs: ItemFact[]) => fs.reduce((a, f) => a + Math.round((f.qty * f.finalUnitPrice * f.commissionBps) / 10_000), 0);
@@ -138,6 +142,10 @@ export async function adminMembers(db: DB): Promise<AdminMemberDTO[]> {
       orderCount: a[m.id]?.orders ?? 0,
       lastOrderAt: a[m.id]?.last ? new Date(a[m.id].last).toISOString() : null,
       joinedAt: m.createdAt.toISOString(),
+      active: m.active,
+      taxNo: m.taxNo,
+      email: m.email,
+      phone: m.phone,
     }))
     .sort((x, y) => y.gmv90 - x.gmv90);
 }
@@ -155,6 +163,10 @@ export async function adminSuppliers(db: DB): Promise<AdminSupplierDTO[]> {
     .groupBy(s.orderItems.supplierId);
   const oc = Object.fromEntries(offerCounts.map((r) => [r.supplierId, r.n]));
   const ic = Object.fromEntries(issueCounts.map((r) => [r.supplierId, r.n]));
+  const unsettled = await db
+    .select({ supplierId: s.orderItems.supplierId, qty: s.orderItems.qty, finalUnitPrice: s.orderItems.finalUnitPrice, vatRate: s.orderItems.vatRate, commissionBps: s.orderItems.commissionBps })
+    .from(s.orderItems)
+    .where(and(eq(s.orderItems.status, 'delivered'), isNull(s.orderItems.settlementId)));
   return sups
     .map((x) => ({
       id: x.id,
@@ -166,6 +178,12 @@ export async function adminSuppliers(db: DB): Promise<AdminSupplierDTO[]> {
       offerCount: oc[x.id] ?? 0,
       gmv90: volume(facts.filter((f) => f.supplierId === x.id)),
       issueCount: ic[x.id] ?? 0,
+      active: x.active,
+      iban: x.iban,
+      email: x.email,
+      phone: x.phone,
+      district: x.district,
+      pendingPayout: computeSettlement(unsettled.filter((u) => u.supplierId === x.id)).netAmount,
     }))
     .sort((p, q) => q.gmv90 - p.gmv90);
 }
@@ -212,7 +230,7 @@ export async function adminIssues(db: DB): Promise<AdminIssueDTO[]> {
 }
 
 /** Sorun çözümü: onaylanırsa üyeye kredi yazılır (varsayılan: KDV dahil kalem bedeli). */
-export async function resolveIssue(db: DB, id: string, raw: unknown) {
+export async function resolveIssue(db: DB, id: string, raw: unknown, actor: Actor = {}) {
   const input = resolveIssueInput.parse(raw);
   await db.transaction(async (tx) => {
     // Satır kilidi: aynı bildirimin iki kez onaylanıp iki kez kredi yazılması engellenir.
@@ -233,6 +251,27 @@ export async function resolveIssue(db: DB, id: string, raw: unknown) {
         refId: it.order.id,
       });
     }
+    await notify(tx, {
+      orgId: it.order.memberId,
+      type: `issue.${input.status}`,
+      title: input.status === 'resolved' ? `Bildiriminiz onaylandı: ${formatTRY(credit)} iade` : 'Mal kabul bildiriminiz reddedildi',
+      body:
+        input.status === 'resolved'
+          ? `${it.order.number} için iade kredi bakiyenize eklendi.`
+          : `${it.order.number} için yaptığınız bildirim incelendi ve reddedildi. Sorularınız için destek ekibine yazabilirsiniz.`,
+      link: `/uye/siparisler/${it.order.id}`,
+      email: true,
+    });
+    if (credit > 0) {
+      await notify(tx, {
+        orgId: it.supplierId,
+        type: 'issue.deduction',
+        title: `Mal kabul iadesi: ${formatTRY(credit)}`,
+        body: `${it.order.number} için onaylanan iade bir sonraki hakedişinizden düşülecek.`,
+        link: '/tedarikci/hakedis',
+      });
+    }
+    await audit(tx, actor, `issue.${input.status}`, 'issue', id, `${it.order.number} bildirimi ${input.status === 'resolved' ? `onaylandı (${formatTRY(credit)})` : 'reddedildi'}`);
   });
 }
 

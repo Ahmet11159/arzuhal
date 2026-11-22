@@ -45,7 +45,9 @@ Giriş ekranında her rol için tek tıkla demo butonu vardır.
 | `npm run db:generate` | Şema değişikliğinden SQL migration üretir (drizzle-kit) |
 | `npm run db:seed` | Boş veritabanına demo verisi yükler |
 | `npm run db:reset` | Tüm tabloları temizleyip demo verisini yeniden yükler |
-| `npm run verify` | Çalışan sunucuya karşı 68 kontrollü arka uç doğrulaması (yetki, para hesapları, eşzamanlı stok/kredi/dalga yarışları, iptal iadesi, bakım işleri). Önce `npm run db:reset`. |
+| `npm run verify` | Çalışan sunucuya karşı 154 kontrollü arka uç doğrulaması: yetki, para hesapları, kartla ödeme, eşzamanlı stok/kredi/dalga/hakediş yarışları, iptal iadesi, hesap açma ve oturum iptali, şifre sıfırlama, bakım işleri. Önce `npm run db:reset`. |
+| `npm run verify:iyzico -w @havuz/web` | iyzico entegrasyonunu iyzico API'sini taklit eden yerel sunucuyla uçtan uca sınar (imza, dönüş, tutar sahteciliği, mükerrer ödeme). |
+| `npm run create-admin -w @havuz/web -- "Ad" e@posta` | Boş kurulumda ilk yönetim hesabını açar. |
 
 ## Ortam değişkenleri (`apps/web/.env`)
 
@@ -56,7 +58,12 @@ Giriş ekranında her rol için tek tıkla demo butonu vardır.
 | `PGLITE_DIR` | `./.data/pglite` | Gömülü veritabanı klasörü. |
 | `AUTO_SEED` | geliştirmede `true`, production'da `false` | Boş veritabanına demo verisi yüklensin mi? |
 | `CRON_SECRET` | boş | `/api/v1/cron/maintenance` uç noktasının anahtarı (sunucusuz kurulumda zamanlanmış görev için). |
-| `HAVUZ_SCHEDULER` | açık | `off` ise dakikalık otomatik bakım (dalga kapatma, gecikmiş ödeme) süreç içinde çalışmaz. |
+| `HAVUZ_SCHEDULER` | açık | `off` ise dakikalık otomatik bakım süreç içinde çalışmaz. |
+| `APP_URL` | `http://localhost:3100` | E-posta bağlantıları ve iyzico dönüş adresi için sitenin adresi. |
+| `PAYMENT_PROVIDER` | geliştirmede `test` | `test` (uygulama içi test ödeme sayfası) veya `iyzico`. iyzico için `IYZICO_API_KEY`, `IYZICO_SECRET_KEY`, `IYZICO_BASE_URL`. |
+| `EMAIL_PROVIDER` / `WHATSAPP_PROVIDER` | `console` | `resend` / `cloud` ile gerçek gönderim. Tüm liste: `apps/web/.env.example`. |
+
+Canlıya çıkış adımları için [`docs/DEPLOY.md`](docs/DEPLOY.md) dosyasına bakın.
 
 ## Ne içeriyor?
 
@@ -73,11 +80,26 @@ tedarikçiler, aralarında akan sipariş darbeleri), canlı dalga geri sayımı,
 - Hesap: kredi defteri, vadeli ödemeler, aylık konsolide fatura, Pro'ya geçiş.
 
 **Tedarikçi paneli (`/tedarikci`).** Ciro, açık dalga talep tahmini, müşteriye göre gruplanmış
-kalemler (onayla, sevk et, teslim edildi, iptal), fiyat, kademe ve stok düzenleme.
+kalemler (onayla, sevk et, teslim edildi, iptal), fiyat/kademe/stok düzenleme, katalogdaki ürünlere yeni
+teklif, **hakedişler** (bekleyen bakiye, komisyon ve iade dökümü, yazdırılabilir hakediş belgesi), IBAN.
 
 **Yönetim paneli (`/yonetim`).** İşlem hacmi ve büyüme, **platform gelir kırılımı** (komisyon,
-abonelik, finansman, sponsorlu ürün), dalga açma ve kapatma (kademe iadelerinin otomatik yazılması),
-üye risk tablosu, tedarikçi karnesi, mal kabul onayı ve başvurular.
+abonelik, finansman, sponsorlu ürün), dalga açma ve kapatma, başvurudan veya doğrudan işletme/tedarikçi
+hesabı açma ve düzenleme (plan, vadeli limit, komisyon, pasifleştirme), ürün ve kategori yönetimi,
+tedarikçi hakedişlerini oluşturma ve ödendi işaretleme, mal kabul onayı, işlem kaydı, ödemeler ve
+gönderilen e-posta/WhatsApp mesajları.
+
+**Ödeme.** Peşin siparişte kart ödemesi (30 dakika içinde ödenmezse sipariş iptal, stok ve kredi iade),
+vadeli borç ve Pro üyelik ödemesi. Sağlayıcıdan bağımsız: geliştirmede test kartlarıyla çalışan dahili
+ödeme sayfası, canlıda iyzico Checkout Form. Tahsil edilen hiçbir tutar kaybolmaz: mükerrer veya geç
+gelen ödemeler kredi bakiyesine iade edilir.
+
+**Hesap ve güvenlik.** Geçici şifreyle açılan hesap ilk girişte şifre belirler; ekip üyeleri; şifre
+değiştirme ve e-postayla sıfırlama; şifre değişince ve kullanıcı pasifleşince tüm oturumlar anında düşer;
+kim neyi ne zaman yaptı işlem kaydında.
+
+**Bildirimler.** Uygulama içi bildirim zili, e-posta ve WhatsApp: yeni sipariş, sevkiyat, dalga açılışı ve
+kapanış hatırlatması, kademe iadesi, vade yaklaşıyor/geçti, mal kabul sonucu, hakediş ödemesi.
 
 **Genel.** Açık ve koyu tema (sistem + elle seçim), mobilde alt sekme çubuğu ve alttan açılan
 paneller, PWA manifest, `prefers-reduced-motion` desteği.

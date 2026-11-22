@@ -1,4 +1,8 @@
 import type {
+  LeadStatus,
+  PaymentPurpose,
+  PaymentRecordStatus,
+  SettlementStatus,
   BusinessType,
   IssueStatus,
   IssueType,
@@ -28,6 +32,7 @@ export const PAYMENT_TERM_LABEL: Record<PaymentTerm, string> = {
 };
 
 export const PAYMENT_STATUS_LABEL: Record<PaymentStatus, string> = {
+  unpaid: 'Ödeme bekleniyor',
   paid: 'Ödendi',
   due: 'Vadesi bekleniyor',
   overdue: 'Gecikmiş',
@@ -69,4 +74,28 @@ export const BUSINESS_TYPE_LABEL: Record<BusinessType, string> = {
   bar: 'Bar',
   hotel: 'Otel',
   catering: 'Catering',
+};
+
+export const PAYMENT_PURPOSE_LABEL: Record<PaymentPurpose, string> = {
+  order: 'Sipariş ödemesi',
+  due: 'Vadeli borç ödemesi',
+  subscription: 'Pro üyelik',
+};
+
+export const PAYMENT_RECORD_STATUS_LABEL: Record<PaymentRecordStatus, string> = {
+  pending: 'Bekliyor',
+  succeeded: 'Başarılı',
+  failed: 'Başarısız',
+  cancelled: 'İptal',
+};
+
+export const SETTLEMENT_STATUS_LABEL: Record<SettlementStatus, string> = {
+  pending: 'Ödeme bekliyor',
+  paid: 'Ödendi',
+};
+
+export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
+  new: 'Yeni',
+  approved: 'Hesap açıldı',
+  rejected: 'Reddedildi',
 };

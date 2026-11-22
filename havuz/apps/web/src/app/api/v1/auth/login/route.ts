@@ -5,7 +5,7 @@ import { setSessionCookie } from '@/server/auth/session';
 
 export const dynamic = 'force-dynamic';
 
-export const POST = publicRoute(async ({ req, db }) => {
+export const POST = publicRoute(async ({ req, db, actor }) => {
   const body = await req.json().catch(() => ({}));
   const WINDOW = 15 * 60_000;
   const ipKey = `login:ip:${clientIp(req)}`;
@@ -15,7 +15,7 @@ export const POST = publicRoute(async ({ req, db }) => {
   assertNotLimited(emailKey, 8, WINDOW);
   let result;
   try {
-    result = await login(db, body);
+    result = await login(db, body, actor);
   } catch (e) {
     if (e instanceof AppError && e.status === 401) {
       recordFailure(ipKey, WINDOW);

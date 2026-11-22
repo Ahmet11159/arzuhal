@@ -4,7 +4,7 @@ import { cookies, headers } from 'next/headers';
 import { SESSION_COOKIE, SESSION_TTL_SECONDS, sessionSecret, type SessionPayload } from './secret';
 
 export async function signSession(payload: SessionPayload): Promise<string> {
-  return new SignJWT({ org: payload.org, role: payload.role })
+  return new SignJWT({ org: payload.org, role: payload.role, tv: payload.tv, mcp: payload.mcp })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(payload.sub)
     .setIssuedAt()
@@ -17,7 +17,13 @@ export async function verifySession(token: string | undefined | null): Promise<S
   try {
     const { payload } = await jwtVerify(token, sessionSecret(), { algorithms: ['HS256'] });
     if (!payload.sub || typeof payload.org !== 'string' || typeof payload.role !== 'string') return null;
-    return { sub: payload.sub, org: payload.org, role: payload.role as SessionPayload['role'] };
+    return {
+      sub: payload.sub,
+      org: payload.org,
+      role: payload.role as SessionPayload['role'],
+      tv: typeof payload.tv === 'number' ? payload.tv : 0,
+      mcp: payload.mcp === true,
+    };
   } catch {
     return null;
   }

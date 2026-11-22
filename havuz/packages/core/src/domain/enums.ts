@@ -10,7 +10,7 @@ export type Plan = (typeof PLANS)[number];
 export const PAYMENT_TERMS = ['cash', 'net30', 'net60'] as const;
 export type PaymentTerm = (typeof PAYMENT_TERMS)[number];
 
-export const PAYMENT_STATUSES = ['paid', 'due', 'overdue'] as const;
+export const PAYMENT_STATUSES = ['unpaid', 'paid', 'due', 'overdue'] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 /** Kalem (tedarikçi bazlı) yaşam döngüsü. */
@@ -38,3 +38,18 @@ export type BusinessType = (typeof BUSINESS_TYPES)[number];
 
 export const VAT_RATES = [1, 10, 20] as const;
 export type VatRate = (typeof VAT_RATES)[number];
+
+export const PAYMENT_PURPOSES = ['order', 'due', 'subscription'] as const;
+export type PaymentPurpose = (typeof PAYMENT_PURPOSES)[number];
+
+export const PAYMENT_RECORD_STATUSES = ['pending', 'succeeded', 'failed', 'cancelled'] as const;
+export type PaymentRecordStatus = (typeof PAYMENT_RECORD_STATUSES)[number];
+
+export const SETTLEMENT_STATUSES = ['pending', 'paid'] as const;
+export type SettlementStatus = (typeof SETTLEMENT_STATUSES)[number];
+
+export const LEAD_STATUSES = ['new', 'approved', 'rejected'] as const;
+export type LeadStatus = (typeof LEAD_STATUSES)[number];
+
+export const CATEGORY_ICONS = ['Wheat', 'Coffee', 'Milk', 'Apple', 'Beef', 'Package', 'SprayCan'] as const;
+export type CategoryIconName = (typeof CATEGORY_ICONS)[number];

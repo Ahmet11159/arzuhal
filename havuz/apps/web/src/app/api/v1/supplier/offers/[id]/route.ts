@@ -3,7 +3,7 @@ import { updateOffer } from '@/server/services/supplier';
 
 export const dynamic = 'force-dynamic';
 
-export const PATCH = route<{ id: string }>(['supplier'], async ({ req, db, session, params }) => {
-  await updateOffer(db, session, params.id, await req.json().catch(() => ({})));
+export const PATCH = route<{ id: string }>(['supplier'], async ({ req, db, session, params, actor }) => {
+  await updateOffer(db, session, params.id, await req.json().catch(() => ({})), actor);
   return { ok: true };
 });

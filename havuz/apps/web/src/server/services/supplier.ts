@@ -1,11 +1,12 @@
 import 'server-only';
-import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm';
-import { updateOfferInput, type SupplierDashboardDTO, type SupplierOfferDTO, type SupplierOrderItemDTO } from '@havuz/core';
+import { and, desc, eq, gt, inArray, ne, sql } from 'drizzle-orm';
+import { formatTRY, updateOfferInput, type SupplierDashboardDTO, type SupplierOfferDTO, type SupplierOrderItemDTO } from '@havuz/core';
 import type { DB } from '../db/client';
 import * as s from '../db/schema';
 import { badRequest, notFound } from '../http';
 import type { SessionPayload } from '../auth/secret';
 import { DAY, getActiveWave, itemFacts, lastMonths, monthKey, pooledForWave } from './common';
+import { audit, type Actor } from '../audit';
 
 export async function supplierItems(db: DB, session: SessionPayload): Promise<SupplierOrderItemDTO[]> {
   const rows = await db
@@ -32,7 +33,8 @@ export async function supplierItems(db: DB, session: SessionPayload): Promise<Su
     .innerJoin(s.products, eq(s.products.id, s.orderItems.productId))
     .innerJoin(s.categories, eq(s.categories.id, s.products.categoryId))
     .leftJoin(s.waves, eq(s.waves.id, s.orders.waveId))
-    .where(and(eq(s.orderItems.supplierId, session.org), gt(s.orders.createdAt, new Date(Date.now() - 45 * DAY))))
+    // Ödemesi beklenen peşin siparişler tedarikçiye gösterilmez.
+    .where(and(eq(s.orderItems.supplierId, session.org), ne(s.orders.paymentStatus, 'unpaid'), gt(s.orders.createdAt, new Date(Date.now() - 45 * DAY))))
     .orderBy(
       sql`case ${s.orderItems.status} when 'pending' then 0 when 'confirmed' then 1 when 'shipped' then 2 else 3 end`,
       desc(s.orders.createdAt),
@@ -93,7 +95,7 @@ export async function supplierOffers(db: DB, session: SessionPayload): Promise<S
     .sort((a, b) => b.last30Qty - a.last30Qty);
 }
 
-export async function updateOffer(db: DB, session: SessionPayload, id: string, raw: unknown) {
+export async function updateOffer(db: DB, session: SessionPayload, id: string, raw: unknown, actor: Actor = {}) {
   const input = updateOfferInput.parse(raw);
   const offer = await db.query.offers.findFirst({ where: and(eq(s.offers.id, id), eq(s.offers.supplierId, session.org)) });
   if (!offer) throw notFound('Teklif');
@@ -104,10 +106,16 @@ export async function updateOffer(db: DB, session: SessionPayload, id: string, r
     if (i > 0 && tiers[i].unitPrice >= tiers[i - 1].unitPrice) throw badRequest('Her kademe bir öncekinden ucuz olmalı');
     if (i > 0 && tiers[i].minQty === tiers[i - 1].minQty) throw badRequest('Aynı eşikte iki kademe olamaz');
   }
-  await db
-    .update(s.offers)
-    .set({ ...input, tiers, updatedAt: new Date() })
-    .where(eq(s.offers.id, id));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(s.offers)
+      .set({ ...input, tiers, updatedAt: new Date() })
+      .where(eq(s.offers.id, id));
+    const changes = Object.entries(input)
+      .map(([k, v]) => (k === 'basePrice' ? `taban ${formatTRY(v as number)}` : k === 'tiers' ? 'kademeler' : k === 'active' ? (v ? 'satışa açıldı' : 'satıştan kaldırıldı') : k))
+      .join(', ');
+    await audit(tx, { ...actor, userId: session.sub, orgId: session.org }, 'offer.update', 'offer', id, `Teklif güncellendi: ${changes}`);
+  });
 }
 
 export async function supplierDashboard(db: DB, session: SessionPayload): Promise<SupplierDashboardDTO> {
@@ -128,7 +136,8 @@ export async function supplierDashboard(db: DB, session: SessionPayload): Promis
   const statusCounts = await db
     .select({ status: s.orderItems.status, n: sql<number>`count(*)`.mapWith(Number) })
     .from(s.orderItems)
-    .where(eq(s.orderItems.supplierId, sup.id))
+    .innerJoin(s.orders, eq(s.orders.id, s.orderItems.orderId))
+    .where(and(eq(s.orderItems.supplierId, sup.id), ne(s.orders.paymentStatus, 'unpaid')))
     .groupBy(s.orderItems.status);
   const sc = Object.fromEntries(statusCounts.map((r) => [r.status, r.n]));
 

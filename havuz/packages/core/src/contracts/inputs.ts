@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import { BUSINESS_TYPES, ISSUE_TYPES, ITEM_STATUSES, PAYMENT_TERMS } from '../domain/enums';
+import { BUSINESS_TYPES, CATEGORY_ICONS, ISSUE_TYPES, ITEM_STATUSES, PAYMENT_PURPOSES, PAYMENT_TERMS } from '../domain/enums';
+import { luhnValid, passwordProblem } from '../domain/payment';
+import { normalizeIban } from '../domain/settlement';
 
 /** İstemci ve sunucunun ortak kullandığı istek şemaları (tek doğruluk kaynağı). */
 
@@ -102,3 +104,174 @@ export const productQueryInput = z.object({
   q: z.string().trim().max(80).optional(),
 });
 export type ProductQuery = z.infer<typeof productQueryInput>;
+
+// ---------------------------------------------------------------------------
+// Hesap ve kimlik
+// ---------------------------------------------------------------------------
+const strongPassword = z
+  .string()
+  .max(128)
+  .superRefine((v, ctx) => {
+    const p = passwordProblem(v);
+    if (p) ctx.addIssue({ code: z.ZodIssueCode.custom, message: p });
+  });
+
+export const changePasswordInput = z.object({
+  currentPassword: z.string().min(1, 'Mevcut şifrenizi girin'),
+  newPassword: strongPassword,
+});
+export type ChangePasswordInput = z.infer<typeof changePasswordInput>;
+
+export const forgotPasswordInput = z.object({ email: z.string().trim().toLowerCase().email('Geçerli bir e-posta girin') });
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordInput>;
+
+export const resetPasswordInput = z.object({
+  token: z.string().min(20).max(200),
+  newPassword: strongPassword,
+});
+export type ResetPasswordInput = z.infer<typeof resetPasswordInput>;
+
+const phone = z
+  .string()
+  .trim()
+  .regex(/^[0-9+()\s-]{10,20}$/, 'Geçerli bir telefon girin');
+const ibanField = z
+  .string()
+  .trim()
+  .transform((v, ctx) => {
+    const n = normalizeIban(v);
+    if (!n) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Geçerli bir TR IBAN girin' });
+    return n ?? '';
+  });
+
+export const createOrgInput = z
+  .object({
+    type: z.enum(['member', 'supplier']),
+    name: z.string().trim().min(2).max(120),
+    businessType: z.enum(BUSINESS_TYPES).optional(),
+    city: z.string().trim().min(2).max(60),
+    district: z.string().trim().max(60).optional(),
+    taxNo: z
+      .string()
+      .trim()
+      .regex(/^\d{10,11}$/, 'Vergi/TC kimlik no 10–11 hane olmalı')
+      .optional(),
+    email: z.string().trim().toLowerCase().email().optional(),
+    phone: phone.optional(),
+    plan: z.enum(['free', 'pro']).default('free'),
+    creditLimit: z.number().int().min(0).max(1_000_000_000).default(10_000_000),
+    commissionBps: z.number().int().min(0).max(2_000).default(300),
+    iban: ibanField.optional(),
+    owner: z.object({
+      name: z.string().trim().min(2).max(120),
+      email: z.string().trim().toLowerCase().email('Geçerli bir e-posta girin'),
+      phone: phone.optional(),
+    }),
+    leadId: z.string().optional(),
+  })
+  .refine((v) => v.type === 'supplier' || !!v.businessType, { message: 'İşletme türü gerekli', path: ['businessType'] });
+export type CreateOrgInput = z.input<typeof createOrgInput>;
+
+export const updateOrgInput = z
+  .object({
+    name: z.string().trim().min(2).max(120),
+    city: z.string().trim().min(2).max(60),
+    district: z.string().trim().max(60).nullable(),
+    taxNo: z.string().trim().regex(/^\d{10,11}$/).nullable(),
+    email: z.string().trim().toLowerCase().email().nullable(),
+    phone: phone.nullable(),
+    plan: z.enum(['free', 'pro']),
+    creditLimit: z.number().int().min(0).max(1_000_000_000),
+    commissionBps: z.number().int().min(0).max(2_000),
+    active: z.boolean(),
+    iban: ibanField.nullable(),
+  })
+  .partial();
+export type UpdateOrgInput = z.input<typeof updateOrgInput>;
+
+export const inviteUserInput = z.object({
+  name: z.string().trim().min(2).max(120),
+  email: z.string().trim().toLowerCase().email('Geçerli bir e-posta girin'),
+  phone: phone.optional(),
+});
+export type InviteUserInput = z.infer<typeof inviteUserInput>;
+
+export const updateUserInput = z.object({ active: z.boolean() });
+
+export const profileInput = z
+  .object({
+    name: z.string().trim().min(2).max(120),
+    phone: phone.nullable(),
+    orgEmail: z.string().trim().toLowerCase().email().nullable(),
+    orgPhone: phone.nullable(),
+    iban: ibanField.nullable(),
+  })
+  .partial();
+export type ProfileInput = z.input<typeof profileInput>;
+
+export const leadDecisionInput = z.object({ status: z.literal('rejected') });
+
+// ---------------------------------------------------------------------------
+// Katalog yönetimi
+// ---------------------------------------------------------------------------
+export const createCategoryInput = z.object({
+  name: z.string().trim().min(2).max(60),
+  icon: z.enum(CATEGORY_ICONS),
+});
+export type CreateCategoryInput = z.infer<typeof createCategoryInput>;
+
+export const createProductInput = z.object({
+  categoryId: z.string().min(1),
+  name: z.string().trim().min(2).max(80),
+  unit: z.string().trim().min(1).max(20),
+  packLabel: z.string().trim().min(1).max(60),
+  description: z.string().trim().max(300).default(''),
+  vatRate: z.union([z.literal(1), z.literal(10), z.literal(20)]),
+  marketPrice: z.number().int().min(1),
+});
+export type CreateProductInput = z.input<typeof createProductInput>;
+
+export const updateProductInput = createProductInput.partial();
+export type UpdateProductInput = z.input<typeof updateProductInput>;
+
+export const createOfferInput = z
+  .object({
+    productId: z.string().min(1),
+    basePrice: z.number().int().min(1),
+    tiers: z.array(priceTierInput).max(6).default([]),
+    stock: z.number().int().min(0),
+    leadTimeDays: z.number().int().min(0).max(30).default(1),
+  })
+  .refine((v) => v.tiers.every((t) => t.unitPrice < v.basePrice), 'Kademe fiyatları taban fiyattan düşük olmalı');
+export type CreateOfferInput = z.input<typeof createOfferInput>;
+
+// ---------------------------------------------------------------------------
+// Ödeme ve hakediş
+// ---------------------------------------------------------------------------
+export const startPaymentInput = z
+  .object({
+    purpose: z.enum(PAYMENT_PURPOSES),
+    orderId: z.string().min(1).optional(),
+  })
+  .refine((v) => v.purpose === 'subscription' || !!v.orderId, { message: 'Sipariş gerekli', path: ['orderId'] });
+export type StartPaymentInput = z.infer<typeof startPaymentInput>;
+
+export const testCardInput = z.object({
+  holder: z.string().trim().min(3, 'Kart üzerindeki adı girin').max(80),
+  cardNumber: z
+    .string()
+    .transform((v) => v.replace(/\D/g, ''))
+    .refine((v) => luhnValid(v), 'Kart numarası geçersiz'),
+  expiry: z
+    .string()
+    .trim()
+    .regex(/^(0[1-9]|1[0-2])\/\d{2}$/, 'Son kullanma AA/YY biçiminde olmalı'),
+  cvc: z.string().trim().regex(/^\d{3,4}$/, 'CVC 3–4 hane olmalı'),
+});
+export type TestCardInput = z.input<typeof testCardInput>;
+
+export const createSettlementsInput = z.object({ periodEnd: z.coerce.date() });
+export type CreateSettlementsInput = { periodEnd: string | Date };
+
+export const markSettlementPaidInput = z.object({ reference: z.string().trim().min(3, 'Havale/EFT referansı girin').max(80) });
+export type MarkSettlementPaidInput = z.infer<typeof markSettlementPaidInput>;

@@ -25,5 +25,9 @@ export async function publicStats(db: DB): Promise<PublicStatsDTO> {
 
 export async function createLead(db: DB, raw: unknown) {
   const input = leadInput.parse(raw);
-  await db.insert(s.leads).values({ ...input, monthlySpend: input.monthlySpend ?? null });
+  await db.transaction(async (tx) => {
+    const [lead] = await tx.insert(s.leads).values({ ...input, monthlySpend: input.monthlySpend ?? null }).returning();
+    const { notifyNewLead } = await import('./accounts');
+    await notifyNewLead(tx, lead);
+  });
 }

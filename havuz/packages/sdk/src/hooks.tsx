@@ -1,6 +1,19 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import type {
+  ChangePasswordInput,
+  CreateCategoryInput,
+  CreateOfferInput,
+  CreateOrgInput,
+  CreateProductInput,
+  CreateSettlementsInput,
+  InviteUserInput,
+  MarkSettlementPaidInput,
+  ProfileInput,
+  StartPaymentInput,
+  TestCardInput,
+  UpdateOrgInput,
+  UpdateProductInput,
   CreateOrderInput,
   CreateWaveInput,
   ProductQuery,
@@ -44,6 +57,17 @@ export const qk = {
   adminSuppliers: ['admin', 'suppliers'] as const,
   adminIssues: ['admin', 'issues'] as const,
   adminLeads: ['admin', 'leads'] as const,
+  settings: ['account', 'settings'] as const,
+  notifications: ['notifications'] as const,
+  payments: ['payments'] as const,
+  testPayment: (id: string) => ['payments', 'test', id] as const,
+  statement: (m: string) => ['member', 'statement', m] as const,
+  supplierPayouts: ['supplier', 'payouts'] as const,
+  settlement: (id: string) => ['settlements', id] as const,
+  adminProducts: ['admin', 'products'] as const,
+  adminPayouts: ['admin', 'payouts'] as const,
+  adminAudit: (q: string, e: string) => ['admin', 'audit', q, e] as const,
+  adminOutbox: ['admin', 'outbox'] as const,
 };
 
 type Opts<T> = Omit<UseQueryOptions<T>, 'queryKey' | 'queryFn'>;
@@ -176,25 +200,6 @@ export const useConfirmDelivery = (orderId: string) => {
     },
   });
 };
-export const usePayOrder = () => {
-  const c = useHavuz();
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (orderId: string) => c.member.payOrder(orderId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['member'] });
-      qc.invalidateQueries({ queryKey: qk.orders });
-    },
-  });
-};
-export const useUpgrade = () => {
-  const c = useHavuz();
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => c.member.upgrade(),
-    onSuccess: () => qc.invalidateQueries(),
-  });
-};
 export const useUpdateSupplierItem = () => {
   const c = useHavuz();
   const qc = useQueryClient();
@@ -238,6 +243,186 @@ export const useResolveIssue = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: ResolveIssueInput }) => c.admin.resolveIssue(id, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin'] }),
+  });
+};
+
+// ---- Hesap, bildirim, ödeme, hakediş, yönetim ----
+
+export const useSettings = () => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.settings, queryFn: () => c.account.settings() });
+};
+export const useNotifications = () => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.notifications, queryFn: () => c.notifications.list(), refetchInterval: 60_000 });
+};
+export const usePayments = () => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.payments, queryFn: () => c.payments.list() });
+};
+export const useTestPayment = (id: string) => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.testPayment(id), queryFn: () => c.payments.testPage(id), enabled: !!id });
+};
+export const useStatement = (month: string) => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.statement(month), queryFn: () => c.member.statement(month), enabled: !!month });
+};
+export const useSupplierPayouts = () => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.supplierPayouts, queryFn: () => c.supplier.payouts() });
+};
+export const useSettlement = (id: string) => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.settlement(id), queryFn: () => c.settlements.get(id), enabled: !!id });
+};
+export const useAdminProducts = () => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.adminProducts, queryFn: () => c.admin.products() });
+};
+export const useAdminPayouts = () => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.adminPayouts, queryFn: () => c.admin.payouts() });
+};
+export const useAdminAudit = (q = '', entity = '') => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.adminAudit(q, entity), queryFn: () => c.admin.audit(q || undefined, entity || undefined), placeholderData: (p) => p });
+};
+export const useAdminOutbox = () => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.adminOutbox, queryFn: () => c.admin.outbox() });
+};
+
+export const useChangePassword = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (i: ChangePasswordInput) => c.auth.changePassword(i), onSuccess: () => qc.invalidateQueries() });
+};
+export const useForgotPassword = () => {
+  const c = useHavuz();
+  return useMutation({ mutationFn: c.auth.forgotPassword });
+};
+export const useResetPassword = () => {
+  const c = useHavuz();
+  return useMutation({ mutationFn: c.auth.resetPassword });
+};
+export const useUpdateProfile = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (i: ProfileInput) => c.account.updateProfile(i),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.settings });
+      qc.invalidateQueries({ queryKey: qk.me });
+      qc.invalidateQueries({ queryKey: qk.supplierPayouts });
+    },
+  });
+};
+export const useInviteUser = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (i: InviteUserInput) => c.account.invite(i), onSuccess: () => qc.invalidateQueries({ queryKey: qk.settings }) });
+};
+export const useSetUserActive = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) => c.account.setUserActive(id, active),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.settings }),
+  });
+};
+export const useMarkNotificationsRead = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id?: string) => c.notifications.markRead(id), onSuccess: () => qc.invalidateQueries({ queryKey: qk.notifications }) });
+};
+export const useStartPayment = () => {
+  const c = useHavuz();
+  return useMutation({ mutationFn: (i: StartPaymentInput) => c.payments.start(i) });
+};
+export const useCompleteTestPayment = (id: string) => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (card: TestCardInput) => c.payments.completeTest(id, card), onSuccess: () => qc.invalidateQueries() });
+};
+export const useCancelOrder = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (orderId: string) => c.orders.cancel(orderId), onSuccess: () => qc.invalidateQueries() });
+};
+export const useCreateOffer = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (i: CreateOfferInput) => c.supplier.createOffer(i),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['supplier'] });
+      qc.invalidateQueries({ queryKey: ['catalog'] });
+    },
+  });
+};
+export const useCreateOrg = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (i: CreateOrgInput) => c.admin.createOrg(i), onSuccess: () => qc.invalidateQueries({ queryKey: ['admin'] }) });
+};
+export const useUpdateOrg = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: UpdateOrgInput }) => c.admin.updateOrg(id, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin'] }),
+  });
+};
+export const useRejectLead = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => c.admin.rejectLead(id), onSuccess: () => qc.invalidateQueries({ queryKey: qk.adminLeads }) });
+};
+export const useCreateProduct = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (i: CreateProductInput) => c.admin.createProduct(i),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.adminProducts });
+      qc.invalidateQueries({ queryKey: ['catalog'] });
+    },
+  });
+};
+export const useUpdateProduct = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: UpdateProductInput }) => c.admin.updateProduct(id, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.adminProducts });
+      qc.invalidateQueries({ queryKey: ['catalog'] });
+    },
+  });
+};
+export const useCreateCategory = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (i: CreateCategoryInput) => c.admin.createCategory(i),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.categories });
+      qc.invalidateQueries({ queryKey: qk.adminProducts });
+    },
+  });
+};
+export const useCreateSettlements = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (i: CreateSettlementsInput) => c.admin.createSettlements(i), onSuccess: () => qc.invalidateQueries({ queryKey: ['admin'] }) });
+};
+export const useMarkSettlementPaid = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: MarkSettlementPaidInput }) => c.admin.markSettlementPaid(id, input),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin'] }),
   });
 };

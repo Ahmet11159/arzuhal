@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { ArrowRight, Building2, Lock, Mail, ShieldCheck, Store, Truck } from 'lucide-react';
@@ -37,7 +38,8 @@ export function LoginView() {
       const r = await login.mutateAsync(parsed.data);
       const next = params.get('next');
       const home = HOME[r.user.role];
-      router.replace(next && next.startsWith(home) ? next : home);
+      if (r.user.mustChangePassword) router.replace('/sifre-degistir');
+      else router.replace(next && next.startsWith(home) ? next : home);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Giriş başarısız');
@@ -63,6 +65,11 @@ export function LoginView() {
               <Field label="Şifre">
                 <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} icon={<Lock className="h-4 w-4" />} placeholder="••••••••" />
               </Field>
+              <div className="-mt-1 text-right">
+                <Link href="/sifremi-unuttum" className="text-[13px] font-medium text-primary hover:underline">
+                  Şifremi unuttum
+                </Link>
+              </div>
               {error && (
                 <motion.p initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: [0, -6, 6, -3, 0] }} className="text-sm text-danger" role="alert">
                   {error}

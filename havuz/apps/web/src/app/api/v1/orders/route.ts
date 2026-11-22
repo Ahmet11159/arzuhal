@@ -5,6 +5,6 @@ export const dynamic = 'force-dynamic';
 
 export const GET = route(['member', 'admin'], async ({ db, session }) => ({ orders: await listOrders(db, session) }));
 
-export const POST = route(['member'], async ({ req, db, session }) => ({
-  order: await createOrder(db, session, await req.json().catch(() => ({}))),
+export const POST = route(['member'], async ({ req, db, session, actor }) => ({
+  order: await createOrder(db, session, await req.json().catch(() => ({})), actor),
 }));
