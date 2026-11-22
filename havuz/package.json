@@ -1,0 +1,24 @@
+{
+  "name": "havuz",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Havuz — Kafe ve restoranlar için ortak satın alma ağı",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @havuz/web",
+    "build": "npm run build -w @havuz/web",
+    "start": "npm run start -w @havuz/web",
+    "db:generate": "npm run db:generate -w @havuz/web",
+    "db:seed": "npm run db:seed -w @havuz/web",
+    "db:reset": "npm run db:reset -w @havuz/web",
+    "test": "npm run test -w @havuz/core",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint -w @havuz/web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

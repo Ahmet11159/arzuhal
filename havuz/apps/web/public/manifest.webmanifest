@@ -1,0 +1,11 @@
+{
+  "name": "Havuz — Ortak Satın Alma Ağı",
+  "short_name": "Havuz",
+  "description": "Kafe ve restoranlar için ortak satın alma ağı",
+  "start_url": "/uye",
+  "display": "standalone",
+  "background_color": "#060e0b",
+  "theme_color": "#0e8f6e",
+  "lang": "tr",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

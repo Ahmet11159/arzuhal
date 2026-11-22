@@ -1,0 +1,20 @@
+{
+  "name": "@havuz/core",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Platformdan bağımsız iş kuralları, veri sözleşmeleri ve tasarım token'ları (web + mobil ortak)",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "sideEffects": false,
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
+  }
+}

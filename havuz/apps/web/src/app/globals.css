@@ -1,0 +1,171 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Renk token'ları — @havuz/core/design/tokens ile aynı değerler (RGB kanalları). */
+:root {
+  color-scheme: light;
+  --bg: 246 247 244;
+  --surface: 255 255 255;
+  --muted: 239 241 237;
+  --border: 224 229 223;
+  --fg: 12 21 18;
+  --fg-muted: 82 96 90;
+  --fg-subtle: 128 141 135;
+  --primary: 14 143 110;
+  --primary-fg: 255 255 255;
+  --primary-soft: 220 243 234;
+  --accent: 226 140 26;
+  --accent-fg: 34 20 0;
+  --accent-soft: 253 238 214;
+  --danger: 205 60 52;
+  --danger-soft: 252 229 227;
+  --warning: 176 116 0;
+  --warning-soft: 252 242 214;
+  --success: 12 132 72;
+  --success-soft: 219 245 230;
+  --info: 42 120 214;
+  --info-soft: 222 235 251;
+  --shadow: 16 30 24;
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+  --chart-6: #008300;
+  --chart-7: #6250d6;
+  --chart-brand: #0e8f6e;
+  --chart-grid: #e6e9e4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: 6 14 11;
+    --surface: 13 25 21;
+    --muted: 19 35 30;
+    --border: 31 51 44;
+    --fg: 236 243 240;
+    --fg-muted: 156 175 167;
+    --fg-subtle: 112 132 124;
+    --primary: 44 199 154;
+    --primary-fg: 3 18 13;
+    --primary-soft: 16 52 42;
+    --accent: 245 180 83;
+    --accent-fg: 34 20 0;
+    --accent-soft: 56 40 14;
+    --danger: 239 106 98;
+    --danger-soft: 60 22 20;
+    --warning: 224 165 38;
+    --warning-soft: 52 38 8;
+    --success: 60 207 127;
+    --success-soft: 14 48 30;
+    --info: 87 156 240;
+    --info-soft: 16 34 58;
+    --shadow: 0 0 0;
+    --chart-1: #3987e5;
+    --chart-2: #d95926;
+    --chart-3: #199e70;
+    --chart-4: #c98500;
+    --chart-5: #d55181;
+    --chart-6: #0ca30c;
+    --chart-7: #9085e9;
+    --chart-brand: #2cc79a;
+    --chart-grid: #1c2f29;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: 6 14 11;
+  --surface: 13 25 21;
+  --muted: 19 35 30;
+  --border: 31 51 44;
+  --fg: 236 243 240;
+  --fg-muted: 156 175 167;
+  --fg-subtle: 112 132 124;
+  --primary: 44 199 154;
+  --primary-fg: 3 18 13;
+  --primary-soft: 16 52 42;
+  --accent: 245 180 83;
+  --accent-fg: 34 20 0;
+  --accent-soft: 56 40 14;
+  --danger: 239 106 98;
+  --danger-soft: 60 22 20;
+  --warning: 224 165 38;
+  --warning-soft: 52 38 8;
+  --success: 60 207 127;
+  --success-soft: 14 48 30;
+  --info: 87 156 240;
+  --info-soft: 16 34 58;
+  --shadow: 0 0 0;
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
+  --chart-6: #0ca30c;
+  --chart-7: #9085e9;
+  --chart-brand: #2cc79a;
+  --chart-grid: #1c2f29;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-bg text-fg antialiased;
+    font-feature-settings: 'ss01', 'cv11';
+  }
+  ::selection {
+    background: rgb(var(--primary) / 0.25);
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--primary));
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  .bg-grid {
+    background-image: linear-gradient(rgb(var(--fg) / 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--fg) / 0.05) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  .glass {
+    background: rgb(var(--surface) / 0.72);
+    backdrop-filter: saturate(160%) blur(14px);
+    -webkit-backdrop-filter: saturate(160%) blur(14px);
+  }
+  .pb-safe {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

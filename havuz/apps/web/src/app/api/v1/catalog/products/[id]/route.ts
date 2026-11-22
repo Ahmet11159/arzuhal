@@ -1,0 +1,6 @@
+import { route } from '@/server/http';
+import { getProduct } from '@/server/services/catalog';
+
+export const dynamic = 'force-dynamic';
+
+export const GET = route<{ id: string }>(['member', 'supplier', 'admin'], async ({ db, params }) => ({ product: await getProduct(db, params.id) }));
