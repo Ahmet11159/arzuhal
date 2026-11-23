@@ -40,6 +40,7 @@ import { useCart } from '@/stores/cart';
 import { fmtDate, fmtDateTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { compressImage } from '@/lib/image';
+import { ProductVisual } from '@/components/ui/product-visual';
 
 export default function OrderDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -189,12 +190,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               <ul className="divide-y divide-border">
                 {items.map((it) => (
                   <li key={it.id} className="flex flex-wrap items-center gap-4 px-5 py-4 sm:flex-nowrap">
-                    {it.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={it.image} alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover ring-1 ring-border" />
-                    ) : (
-                      <CategoryIcon name={it.categoryIcon} />
-                    )}
+                    <ProductVisual imageUrl={it.image} icon={it.categoryIcon} alt={it.productName} />
                     <div className="min-w-0 flex-1">
                       <div className="font-medium">{it.productName}</div>
                       <div className="text-xs text-fg-muted">

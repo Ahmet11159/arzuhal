@@ -86,6 +86,8 @@ export interface ProductDTO {
   description: string;
   vatRate: number;
   marketPrice: Kurus;
+  /** Ürün fotoğrafı adresi (önbellekli); yoksa kategori simgesi gösterilir */
+  imageUrl: string | null;
   category: { id: string; slug: string; name: string; icon: string };
   offers: OfferDTO[];
   bestOfferId: string | null;
@@ -139,7 +141,7 @@ export interface OrderItemDTO {
   vatRate: number;
   status: ItemStatus;
   issue: { id: string; type: IssueType; status: IssueStatus; qty: number; note: string | null; creditAmount: Kurus; photo: string | null } | null;
-  /** Ürün fotoğrafı (varsa) */
+  /** Ürün fotoğrafı adresi (varsa) */
   image: string | null;
   /** Teslim edildiyse sorun bildiriminin son anı */
   issueDeadline: ISODate | null;
@@ -363,6 +365,8 @@ export interface AdminSupplierDTO {
   district: string | null;
   pendingPayout: Kurus;
   payout: PayoutProfileStatusDTO;
+  /** Teslimden 3 gün geçmiş, faturası yüklenmemiş sipariş sayısı */
+  missingInvoices: number;
 }
 
 export interface PayoutProfileStatusDTO {
@@ -602,6 +606,7 @@ export interface AdminProductDTO {
   description: string;
   vatRate: number;
   marketPrice: Kurus;
+  imageUrl: string | null;
   category: { id: string; name: string; icon: string };
   offerCount: number;
   bestPrice: Kurus | null;
@@ -636,4 +641,23 @@ export interface HealthDTO {
   whatsappProvider: string;
   version: string;
   time: ISODate;
+}
+
+export interface CompanyDTO {
+  legalName: string;
+  brandName: string;
+  address: string;
+  taxOffice: string;
+  taxNo: string;
+  mersisNo: string;
+  tradeRegistryNo: string;
+  phone: string;
+  email: string;
+  kepAddress: string;
+  supportHours: string;
+  kvkkEmail: string;
+  etbisNo: string;
+  /** Yönetim bilgileri girdi mi (girmediyse yasal sayfalarda yer tutucular görünür) */
+  configured: boolean;
+  updatedAt: ISODate | null;
 }

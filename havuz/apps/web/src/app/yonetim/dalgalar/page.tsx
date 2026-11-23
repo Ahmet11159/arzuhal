@@ -38,7 +38,7 @@ export default function AdminWaves() {
     <div className="space-y-6">
       <PageHeader
         title="Dalgalar"
-        description="Toplu sipariş dalgalarını açın, izleyin ve kapatın. Kapanışta nihai kademeler uygulanır, farklar üyelere kredi olarak yazılır."
+        description="Toplu sipariş dalgalarını açın, izleyin ve kapatın. Kapanışta nihai kademeler uygulanır; farklar üyelere döner (ödenmiş siparişte karta iade, vadelide borçtan düşüm)."
         action={
           <Button onClick={() => setCreating(true)}>
             <Plus className="h-4 w-4" /> Yeni dalga
@@ -156,7 +156,7 @@ export default function AdminWaves() {
                 if (!w) return;
                 try {
                   const r = await close.mutateAsync(w.id);
-                  toast.success('Dalga kapatıldı', { description: `${r.members} üyeye toplam ${formatTRY(r.totalCredit)} kademe iadesi yazıldı.` });
+                  toast.success('Dalga kapatıldı', { description: `${r.members} üyeye toplam ${formatTRY(r.totalCredit)} kademe farkı döndü (karta iade veya borçtan düşüm).` });
                   setSelected(null);
                   setConfirming(false);
                 } catch (e) {
@@ -164,7 +164,7 @@ export default function AdminWaves() {
                 }
               }}
             >
-              <Lock className="h-4 w-4" /> Kapat ve iadeleri yaz
+              <Lock className="h-4 w-4" /> Kapat ve farkları iade et
             </Button>
           </div>
         }
@@ -176,7 +176,7 @@ export default function AdminWaves() {
             </p>
             <ul className="list-disc space-y-1.5 pl-5">
               <li>Her ürün için havuzdaki toplam miktara göre nihai kademe belirlenir.</li>
-              <li>Daha yüksek kademeden ödeyen üyelere fark kredi bakiyesi olarak yazılır.</li>
+              <li>Daha yüksek kademeden ödeyen üyelere fark kartlarına iade edilir veya vadeli borçlarından düşülür.</li>
               <li>Tedarikçiler nihai fiyatlarla sevkiyat listesini görür.</li>
             </ul>
             <p>

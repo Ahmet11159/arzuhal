@@ -2,7 +2,9 @@ import { createContext, useContext, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import type {
   ChangePasswordInput,
+  CompanyInput,
   PayoutProfileInput,
+  UploadInvoiceInput,
   CreateCategoryInput,
   CreateOfferInput,
   CreateOrgInput,
@@ -478,4 +480,24 @@ export const useRefundAction = () => {
       qc.invalidateQueries({ queryKey: qk.payments });
     },
   });
+};
+export const useUploadInvoice = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (i: UploadInvoiceInput) => c.supplier.uploadInvoice(i),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.supplierItems });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+};
+export const useCompany = () => {
+  const c = useHavuz();
+  return useQuery({ queryKey: ['admin', 'company'], queryFn: () => c.admin.company() });
+};
+export const useUpdateCompany = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (i: CompanyInput) => c.admin.updateCompany(i), onSuccess: (d) => qc.setQueryData(['admin', 'company'], d) });
 };

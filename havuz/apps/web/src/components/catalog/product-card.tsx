@@ -4,12 +4,12 @@ import { motion } from 'framer-motion';
 import { Check, Plus, Sparkles, Store, Users } from 'lucide-react';
 import { formatPercent, formatTRY, savingRatio, type ProductDTO } from '@havuz/core';
 import { useCart, type CartMode } from '@/stores/cart';
-import { CategoryIcon } from '../ui/icon';
 import { TiltCard } from '../ui/tilt';
 import { Progress } from '../ui/progress';
 import { QtyStepper } from '../app/qty-stepper';
 import { bestOffer, offerUnitPrice } from './pricing';
 import { cn } from '@/lib/cn';
+import { ProductVisual } from '../ui/product-visual';
 
 export function ProductCard({ p, mode, onOpen, index }: { p: ProductDTO; mode: CartMode; onOpen: () => void; index: number }) {
   const offer = bestOffer(p, mode);
@@ -31,7 +31,7 @@ export function ProductCard({ p, mode, onOpen, index }: { p: ProductDTO; mode: C
       <TiltCard intensity={5} className="h-full rounded-2xl">
         <div className={cn('flex h-full flex-col rounded-2xl border bg-surface p-4 shadow-card transition-shadow hover:shadow-lift', qty > 0 ? 'border-primary/50' : 'border-border')}>
           <button onClick={onOpen} className="flex items-start gap-3 text-left" aria-label={`${p.name} ayrıntıları`}>
-            <CategoryIcon name={p.category.icon} size="lg" className="[transform:translateZ(24px)]" />
+            <ProductVisual imageUrl={p.imageUrl} icon={p.category.icon} size="lg" alt={p.name} className="[transform:translateZ(24px)]" />
             <div className="min-w-0 flex-1">
               <h3 className="font-semibold leading-snug">{p.name}</h3>
               <p className="mt-0.5 text-xs text-fg-muted">{p.packLabel}</p>

@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { Hero } from '@/components/landing/hero';
 import { SiteNav } from '@/components/landing/site-nav';
 import { HowItWorks, Pricing, SupplierSection, TrustStrip, ValueProps } from '@/components/landing/sections';
@@ -6,8 +5,7 @@ import { TierDemo } from '@/components/landing/tier-demo';
 import { SavingsCalculator } from '@/components/landing/savings-calculator';
 import { LeadForm } from '@/components/landing/lead-form';
 import { Reveal, SectionHeading } from '@/components/landing/reveal';
-import { Logo } from '@/components/ui/logo';
-import { ThemeToggle } from '@/components/app/theme-toggle';
+import { SiteFooter } from '@/components/site/site-footer';
 
 export default function HomePage() {
   return (
@@ -55,18 +53,7 @@ export default function HomePage() {
         </section>
       </main>
 
-      <footer className="border-t border-border py-10">
-        <div className="container flex flex-col items-center justify-between gap-6 text-sm text-fg-muted sm:flex-row">
-          <Logo />
-          <p>© {new Date().getFullYear()} Havuz · Bağımsız işletmelerin ortak satın alma ağı</p>
-          <div className="flex items-center gap-2">
-            <Link href="/giris" className="hover:text-fg">
-              Giriş
-            </Link>
-            <ThemeToggle />
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </>
   );
 }

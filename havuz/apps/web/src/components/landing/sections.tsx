@@ -85,7 +85,7 @@ export function HowItWorks() {
     { icon: ShoppingBasket, title: 'Sepetini oluştur', text: 'Standart ürün kartlarından, birden çok tedarikçinin teklifini yan yana görerek seç.' },
     { icon: Waves, title: 'Dalgaya katıl', text: 'Haftalık toplu sipariş dalgasına ekle. Perşembe 18:00’de kapanır, cumartesi teslim.' },
     { icon: Users, title: 'Hacim birikir', text: 'Diğer işletmelerin siparişleri havuzda birleşir. Her kademe aşıldığında birim fiyat düşer.' },
-    { icon: PackageCheck, title: 'Teslim al, kontrol et', text: 'Mal kabulde eksik veya hasarı tek dokunuşla bildir. Onaylanan iade kredine geçer.' },
+    { icon: PackageCheck, title: 'Teslim al, kontrol et', text: 'Mal kabulde eksik veya hasarı tek dokunuşla bildir. Onaylanan tutar kartına iade edilir.' },
   ];
   return (
     <section id="nasil" className="relative border-y border-border bg-muted/40 py-24 sm:py-32">
@@ -120,7 +120,7 @@ export function HowItWorks() {
 export function SupplierSection() {
   const perks = [
     { icon: LineChart, title: 'Talep tahmini', text: 'Dalga açıkken toplanan hacmi ve kapanış projeksiyonunu canlı görün; üretim ve rota planlayın.' },
-    { icon: Zap, title: 'Sıfır tahsilat riski', text: 'Ödemeyi Havuz garanti eder. Vadeli satışın finansmanı ve takibi bizde.' },
+    { icon: Zap, title: 'Güvenli tahsilat', text: 'Peşin siparişte ödeme sipariş anında alınır; payınız teslimden sonra iyzico ile doğrudan hesabınıza geçer. Vade takibi ve hatırlatmalar bizde.' },
     { icon: Truck, title: 'Yoğun rotalar', text: 'Aynı semtte toplanan siparişler daha az sefer, daha dolu araç demek.' },
     { icon: BarChart3, title: 'Performans karnesi', text: 'Zamanında teslim ve iade oranınız şeffaf; iyi puan daha fazla görünürlük getirir.' },
   ];
@@ -130,7 +130,7 @@ export function SupplierSection() {
         <SectionHeading
           eyebrow="Tedarikçiler için"
           title="Dağınık küçük siparişler yerine öngörülebilir toplu hacim"
-          description="Yeni müşteri bulma maliyeti, tahsilat riski ve dağınık sevkiyat yükü ortadan kalkar. Karşılığında satış başına şeffaf bir komisyon ödersiniz."
+          description="Yeni müşteri bulma maliyeti, tahsilat takibi ve dağınık sevkiyat yükü ortadan kalkar. Karşılığında satış başına şeffaf bir komisyon ödersiniz."
         />
         <div className="grid gap-4 sm:grid-cols-2">
           {perks.map((p, i) => (

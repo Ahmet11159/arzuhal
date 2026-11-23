@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, asc, desc, eq, gt, gte, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, ne, sql } from 'drizzle-orm';
 import {
   canTransition,
   computeOrderTotals,
@@ -20,6 +20,7 @@ import {
   type OrderSummaryDTO,
   type ReportIssueInput,
   trYear,
+  productImageUrl,
 } from '@havuz/core';
 import type { z } from 'zod';
 import type { DB, Executor } from '../db/client';
@@ -41,7 +42,7 @@ type OrderRow = typeof s.orders.$inferSelect & {
   refunds?: RefundRow[];
   invoices?: InvoiceRow[];
   items: (typeof s.orderItems.$inferSelect & {
-    product: typeof s.products.$inferSelect & { category: typeof s.categories.$inferSelect };
+    product: Omit<typeof s.products.$inferSelect, 'image'> & { image?: string | null; imageVersion?: string | null; category: typeof s.categories.$inferSelect };
     supplier: typeof s.organizations.$inferSelect;
     issue: typeof s.issues.$inferSelect | null;
   })[];
@@ -50,7 +51,14 @@ type OrderRow = typeof s.orders.$inferSelect & {
 const orderWith = {
   wave: true,
   member: true,
-  items: { with: { product: { with: { category: true } }, supplier: true, issue: true } },
+  items: {
+    with: {
+      // Fotoğrafın kendisi yüklenmez; adres için sürümü ayrıca okunur (attachImageVersions).
+      product: { columns: { image: false }, with: { category: true } },
+      supplier: true,
+      issue: true,
+    },
+  },
 } as const;
 
 /** Detay: iadeler ve faturalar da (fatura dosyası hariç; dosya ayrı uçtan indirilir). */
@@ -120,7 +128,7 @@ export function toOrderDetail(o: OrderRow): OrderDetailDTO {
       issue: i.issue
         ? { id: i.issue.id, type: i.issue.type, status: i.issue.status, qty: i.issue.qty, note: i.issue.note, creditAmount: i.issue.creditAmount, photo: i.issue.photo }
         : null,
-      image: i.product.image,
+      image: productImageUrl(i.product.id, i.product.imageVersion ?? null),
       issueDeadline:
         i.status === 'delivered' && i.deliveredAt && !i.releasedAt ? new Date(i.deliveredAt.getTime() + ISSUE_REPORT_WINDOW_HOURS * 3600_000).toISOString() : null,
     })),
@@ -142,7 +150,20 @@ export function toOrderDetail(o: OrderRow): OrderDetailDTO {
 async function loadOrder(db: Executor, id: string) {
   const o = await db.query.orders.findFirst({ where: eq(s.orders.id, id), with: orderDetailWith as typeof orderWith });
   if (!o) throw notFound('Sipariş');
+  await attachImageVersions(db, (o as OrderRow).items.map((i) => i.product));
   return o as OrderRow;
+}
+
+/** Ürün fotoğraflarının sürümü (önbellekli adres için); fotoğrafın kendisi taşınmaz. */
+async function attachImageVersions(db: Executor, products: { id: string; imageVersion?: string | null }[]) {
+  const ids = [...new Set(products.map((p) => p.id))];
+  if (!ids.length) return;
+  const rows = await db
+    .select({ id: s.products.id, v: sql<string | null>`left(md5(${s.products.image}), 10)` })
+    .from(s.products)
+    .where(and(inArray(s.products.id, ids), isNotNull(s.products.image)));
+  const map = new Map(rows.map((r) => [r.id, r.v]));
+  for (const p of products) p.imageVersion = map.get(p.id) ?? null;
 }
 
 export async function listOrders(db: DB, session: SessionPayload): Promise<OrderSummaryDTO[]> {

@@ -98,6 +98,8 @@ export const leadInput = z.object({
   businessType: z.enum(BUSINESS_TYPES),
   monthlySpend: z.number().int().min(0).optional(),
   kind: z.enum(['member', 'supplier']).default('member'),
+  /** KVKK aydınlatma metninin okunduğu onayı */
+  kvkkConsent: z.literal(true, { errorMap: () => ({ message: 'Devam etmek için aydınlatma metnini onaylayın' }) }),
 });
 export type LeadInput = z.input<typeof leadInput>;
 
@@ -222,6 +224,12 @@ export const createCategoryInput = z.object({
 });
 export type CreateCategoryInput = z.infer<typeof createCategoryInput>;
 
+/** Ürün fotoğrafı: tarayıcıda küçültülmüş JPEG/PNG/WebP data URL (en fazla ~220 KB). */
+export const productImage = z
+  .string()
+  .max(300_000, 'Fotoğraf çok büyük')
+  .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/, 'Geçersiz fotoğraf biçimi');
+
 export const createProductInput = z.object({
   categoryId: z.string().min(1),
   name: z.string().trim().min(2).max(80),
@@ -230,6 +238,8 @@ export const createProductInput = z.object({
   description: z.string().trim().max(300).default(''),
   vatRate: z.union([z.literal(1), z.literal(10), z.literal(20)]),
   marketPrice: z.number().int().min(1),
+  /** null → fotoğrafı kaldır */
+  image: productImage.nullable().optional(),
 });
 export type CreateProductInput = z.input<typeof createProductInput>;
 
@@ -297,3 +307,40 @@ export const payoutProfileInput = z.object({
   phone: z.string().trim().min(10, 'Telefon numarası gerekli').max(20),
 });
 export type PayoutProfileInput = z.input<typeof payoutProfileInput>;
+
+/** Fatura dosyası: PDF veya görsel, data URL (en fazla ~2 MB). */
+export const INVOICE_MAX_BYTES = 2_000_000;
+export const invoiceFile = z
+  .string()
+  .max(Math.ceil((INVOICE_MAX_BYTES * 4) / 3) + 100, 'Dosya en fazla 2 MB olabilir')
+  .regex(/^data:(application\/pdf|image\/(jpeg|png|webp));base64,[A-Za-z0-9+/=]+$/, 'Yalnızca PDF, JPG, PNG veya WebP yüklenebilir');
+
+export const uploadInvoiceInput = z.object({
+  orderId: z.string().min(1),
+  number: z.string().trim().min(3, 'Fatura numarası gerekli').max(40),
+  issuedAt: z.coerce.date(),
+  /** KDV dahil fatura tutarı (kuruş) */
+  amount: z.number().int().min(0),
+  fileName: z.string().trim().min(1).max(120),
+  file: invoiceFile,
+});
+export type UploadInvoiceInput = z.input<typeof uploadInvoiceInput>;
+
+/** Yasal metinlerde ve iletişim sayfasında kullanılan şirket bilgileri (yönetim düzenler). */
+export const companyInput = z.object({
+  legalName: z.string().trim().min(3, 'Ticari unvan gerekli').max(200),
+  brandName: z.string().trim().min(2).max(60).default('Havuz'),
+  address: z.string().trim().min(10, 'Açık adres gerekli').max(400),
+  taxOffice: z.string().trim().max(100).optional().or(z.literal('')),
+  taxNo: z.string().trim().max(20).optional().or(z.literal('')),
+  mersisNo: z.string().trim().max(30).optional().or(z.literal('')),
+  tradeRegistryNo: z.string().trim().max(40).optional().or(z.literal('')),
+  phone: z.string().trim().min(10, 'Telefon gerekli').max(30),
+  email: z.string().trim().toLowerCase().email('Geçerli bir e-posta girin'),
+  kepAddress: z.string().trim().max(120).optional().or(z.literal('')),
+  supportHours: z.string().trim().max(120).optional().or(z.literal('')),
+  /** KVKK başvuruları için e-posta (boşsa genel e-posta) */
+  kvkkEmail: z.string().trim().toLowerCase().email().optional().or(z.literal('')),
+  etbisNo: z.string().trim().max(60).optional().or(z.literal('')),
+});
+export type CompanyInput = z.input<typeof companyInput>;

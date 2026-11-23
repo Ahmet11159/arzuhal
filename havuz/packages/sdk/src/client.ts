@@ -1,4 +1,7 @@
 import type {
+  CompanyDTO,
+  CompanyInput,
+  UploadInvoiceInput,
   PayoutProfileDTO,
   PayoutProfileInput,
   RefundDTO,
@@ -188,6 +191,7 @@ export function createHavuzClient(opts: HavuzClientOptions) {
       createOffer: (input: CreateOfferInput) => request<{ id: string }>('POST', '/supplier/offers', input),
       payouts: () => request<PayoutOverviewDTO>('GET', '/supplier/payouts'),
       payoutProfile: () => request<PayoutProfileDTO>('GET', '/supplier/payout-profile'),
+      uploadInvoice: (input: UploadInvoiceInput) => request<{ id: string }>('POST', '/supplier/invoices', input),
       updatePayoutProfile: (input: PayoutProfileInput) => request<PayoutProfileDTO>('PUT', '/supplier/payout-profile', input),
     },
     admin: {
@@ -216,6 +220,8 @@ export function createHavuzClient(opts: HavuzClientOptions) {
       updateSupplierPayoutProfile: (id: string, input: PayoutProfileInput) => request<PayoutProfileDTO>('PUT', `/admin/suppliers/${id}/payout-profile`, input),
       syncSupplier: (id: string) => request<{ synced: boolean; reason?: string }>('POST', `/admin/suppliers/${id}/sync`),
       refunds: () => request<{ refunds: RefundDTO[] }>('GET', '/admin/refunds'),
+      company: () => request<CompanyDTO>('GET', '/admin/company'),
+      updateCompany: (input: CompanyInput) => request<CompanyDTO>('PUT', '/admin/company', input),
       refundAction: (id: string, input: { action: 'retry' } | { action: 'mark_done'; note: string }) => request<{ ok: true }>('POST', `/admin/refunds/${id}`, input),
     },
   };

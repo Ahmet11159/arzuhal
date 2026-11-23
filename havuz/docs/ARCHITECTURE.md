@@ -49,11 +49,15 @@ Paketler TypeScript kaynağı olarak dışa aktarılır (`main: src/index.ts`). 
 | `waves` | Toplu sipariş dalgası: kapanış, teslimat, durum, toplam iade. |
 | `orders`, `order_items` | Sipariş, birden çok tedarikçiye ait kalemler. Kalemde `unit_price` (ödenen) ve `final_unit_price` (dalga sonrası) ayrı tutulur. |
 | `issues` | Mal kabul bildirimleri (kalem başına bir). |
-| `ledger_entries` | Üye kredi defteri: dalga iadesi, mal kabul iadesi, kullanılan kredi. Bakiye = toplam. |
+| `ledger_entries` | Üyenin hesap hareketleri: dalga kademe farkı, mal kabul iadesi, iptal (karta iade veya borçtan düşüm). |
+| `payment_items` | Ödeme sepeti kalemleri: sipariş kalemi, tutar, tedarikçinin alt satıcı anahtarı ve payı, sağlayıcı işlem numarası, onay. |
+| `refunds` | Karta iadeler: önce kaydedilir, sonra gönderilir; durum (sırada / işleniyor / tamam / yeniden denenecek / elle kontrol). |
+| `invoices` | Tedarikçinin sipariş için yüklediği fatura (PDF/görsel). |
+| `site_settings` | Yönetimin düzenlediği şirket bilgileri (yasal sayfalar). |
 | `subscriptions` | Pro üyelik tahsilatları. |
 | `leads` | Açılış sayfası başvuruları (yeni / hesap açıldı / reddedildi). |
 | `payments` | Kart ödemeleri: amaç (sipariş, vadeli borç, üyelik), sağlayıcı, durum, sağlayıcı kimliği. |
-| `settlements` | Tedarikçi hakedişleri; kalemler ve düşülen iadeler `settlement_id` ile bağlanır. |
+| `settlements` | Hakediş (mutabakat) belgeleri; serbest bırakılmış kalemler `settlement_id` ile bağlanır. Kanal: `iyzico` (pazaryeri) veya `manual` (havale). |
 | `notifications` | Uygulama içi bildirimler; `dedupe_key` aynı hatırlatmanın iki kez gitmesini önler. |
 | `outbox` | E-posta / WhatsApp gönderim kuyruğu (5 deneme, artan bekleme). |
 | `audit_logs` | İşlem kaydı: kişi, eylem, varlık, özet, IP. İşlemle aynı transaction'da yazılır. |
@@ -77,23 +81,24 @@ ile migration üretilir. Migration'lar uygulama açılışında otomatik uygulan
 
 ### 4.2 Sipariş
 `createOrder`: teklif, stok, aktiflik ve dalga kontrolü yapar. Kademe fiyatını belirler,
-`computeOrderTotals` ile KDV, kredi ve vade farkını hesaplar (vade farkı yalnızca ertelenen tutara
-uygulanır). Vadeli siparişte limit kontrolü yapılır. Sipariş, kalemler, stok düşümü ve kredi
-kullanımı tek transaction'da yazılır. Sipariş durumu kalem durumlarından türetilir
+`computeOrderTotals` ile KDV ve vade farkını hesaplar. Vadeli siparişte limit kontrolü yapılır. Pazaryerinde
+iyzico kaydı tamamlanmamış tedarikçinin ürünü sipariş edilemez. Sipariş, kalemler, stok düşümü ve koşul onayı
+tek transaction'da yazılır. Sipariş durumu kalem durumlarından türetilir
 (`deriveOrderStatus`). Kalem geçişleri `ITEM_TRANSITIONS` ile sınırlıdır.
 
 ### 4.3 Mal kabul
-Üye teslim edilen kalem için sorun bildirir. Yönetim onaylarsa KDV dahil bedel `issue_credit`
-olarak kredi defterine yazılır.
+Üye teslim edilen kalem için teslimden sonraki 48 saat içinde sorun bildirir. Yönetim onaylarsa
+KDV dahil bedel üyeye döner (ödenmişse karta iade, değilse borçtan düşüm) ve tedarikçinin payı aynı oranda azalır.
 
 ### 4.4 Gelir modeli (`computeRevenue`)
 - **Komisyon:** kalem bazında `final_unit_price × qty × commission_bps`.
 - **Abonelik:** Pro üyelik (aylık ₺1.490).
-- **Finansman:** vade farkının fonlama ortağı payı (%60) düşüldükten sonra kalan kısmı.
+- **Finansman:** pazaryerinde vade farkı vadeyi taşıyan tedarikçiye gider (`FINANCING_FEE_TO_SUPPLIER`);
+  standart modda fonlama ortağı payı (%60) düşüldükten sonra kalan kısmı.
 - **Sponsorlu ürün:** tedarikçilerin öne çıkarma ücretleri.
 
 ### 4.5 Eşzamanlılık ve kilit sırası
-Canlıda PostgreSQL istekleri paralel çalıştırır. Para, stok ve kredi tutarlılığı satır kilitleriyle korunur.
+Canlıda PostgreSQL istekleri paralel çalıştırır. Para ve stok tutarlılığı satır kilitleriyle korunur.
 Tüm işlemler kilitleri **aynı sırayla** alır, böylece kilitlenme (deadlock) oluşmaz:
 
 ```
@@ -101,34 +106,46 @@ dalga (FOR SHARE / kapanışta FOR UPDATE) → üye (FOR NO KEY UPDATE) → tekl
 ```
 
 - Stok düşümü koşulludur (`stock >= qty`); stok asla eksiye düşmez.
-- Üye satırı kilidi, aynı üyenin eşzamanlı siparişlerinde kredinin ve vadeli limitin iki kez harcanmasını engeller.
+- Üye satırı kilidi, aynı üyenin eşzamanlı siparişlerinde vadeli limitin iki kez harcanmasını engeller.
 - Dalga kapanışı ile o anda gelen siparişler sıraya girer. Kapanıştan sonra gelen sipariş "dalga kapandı" yanıtı alır.
 - Mal kabul onayı, Pro geçişi ve borç ödemesi koşullu güncelleme ya da kilitle tek seferliktir.
 - `FOR NO KEY UPDATE`, yabancı anahtar kontrollerinin aldığı `KEY SHARE` kilidiyle çakışmaz.
 
 Bu kurallar `npm run verify` ile gerçek PostgreSQL üzerinde eşzamanlı isteklerle test edilir.
 
-### 4.6 İptal ve iade
-Tedarikçinin iptal ettiği kalemin stoğu geri eklenir. Ödenmiş siparişte KDV dahil bedel kredi defterine
-`adjustment` olarak iade edilir. Vadesi bekleyen siparişte borç ve orantılı vade farkı düşülür.
+### 4.6 Para akışı, iptal ve iade (`services/money-flow.ts`)
+Tek hesap fonksiyonu `computeCharges` (core): kalem tutarı = KDV dahil bedel + vade farkı payı − onaylı mal
+kabul iadesi; Havuz payı = komisyon (KDV hariç mal bedeli üzerinden) + %20 KDV'si; tedarikçi payı = kalan. Aynı
+fonksiyon ödeme sepetini, ödenmemiş siparişin borcunu, ödenmiş siparişte iade edilecek farkı ve hakedişi
+hesaplar. Sipariş değişince (`applyOrderChange`): ödenmemişse borç yeniden hesaplanır, ödenmişse kalem başına
+ödenen − olması gereken farkı `refunds` tablosuna yazılır. `processRefunds` iadeyi önce "işleniyor"a alır
+(atomik), sonra sağlayıcıya gönderir; ağ hatası artan aralıklarla denenir, iş kuralı reddi veya 10 dakikadan
+uzun belirsiz kalan iade "elle kontrol" durumuna düşer ve yönetime bildirilir (çift iade riski yok).
 
 ### 4.7 Ödeme (`server/payments`, `services/payments.ts`)
-Sağlayıcı arayüzü (`PaymentProvider`): `createCheckout` ve `retrieve`. Tutar her zaman sunucuda hesaplanır.
+Sağlayıcı arayüzü (`PaymentProvider`): `createCheckout`, `retrieve`, `refund`, `approveItem`, `upsertSubMerchant`.
+Tutar ve sepet her zaman sunucuda hesaplanır; pazaryerinde sepet kalemi tedarikçinin `subMerchantKey` ve
+`subMerchantPrice` değerlerini taşır. Sonuçtaki `itemTransactions` işlem numaraları iade ve onay için saklanır.
 iyzico'da sonuç, kullanıcı dönüşündeki form verisine değil, sunucudan sunucuya `retrieve` ile doğrulanır;
 ödenen tutar ve eşleşme kimliği kontrol edilir. Başarı işlemi idempotenttir (kilit sırası: sipariş → ödeme).
-Para tahsil edilmiş ama karşılığı geçersizse (mükerrer ödeme, iptal edilmiş sipariş, zaten Pro) tutar kredi
-bakiyesine iade edilir; hiçbir tahsilat yok sayılmaz. Peşin sipariş 30 dakika içinde ödenmezse iptal edilir.
+Para tahsil edilmiş ama karşılığı geçersizse (mükerrer ödeme, iptal edilmiş sipariş, zaten Pro) tutarın
+tamamı karta iade edilir; hiçbir tahsilat yok sayılmaz. Peşin sipariş 30 dakika içinde ödenmezse iptal edilir.
 Ödenmemiş sipariş tedarikçiye görünmez ve dalga kapanışında havuza girmez.
 
-### 4.8 Hakediş (`services/settlements.ts`)
-`net = KDV dahil satış − komisyon (KDV hariç tutar üzerinden) − onaylı mal kabul iadeleri`. Dönem sonuna
-kadar teslim edilmiş kalemler `settlement_id IS NULL` koşuluyla atomik olarak sahiplenilir; eşzamanlı iki
-oluşturma çağrısı aynı kalemi iki kez yazamaz. Ödeme banka havalesiyle yapılır, referansla işaretlenir.
+### 4.8 Ürün onayı ve hakediş (`services/money-flow.ts`, `services/settlements.ts`)
+Teslim edilmiş, 48 saatlik itiraz süresi dolmuş, açık bildirimi ve bekleyen iadesi olmayan kalem serbest
+bırakılır (`processReleases`): pazaryerinde iyzico'ya ürün onayı verilir (vadeli siparişte üye ödeyene kadar
+beklenir) ve kalemin nihai tutarları dondurulur. Hakediş belgesi, dönem sonuna kadar serbest bırakılmış
+kalemlerin dondurulmuş tutarlarından oluşur: `net = satış − iade − komisyon − komisyon KDV'si`. Kalemler
+`settlement_id IS NULL` koşuluyla atomik sahiplenilir. iyzico kanalında ödemeyi iyzico yapar (belge komisyon
+faturasının dayanağıdır); standart modda havale yapılır ve referansla işaretlenir.
 
 ### 4.9 Zamanlanmış bakım (`server/jobs.ts`)
-İdempotent işler: ödeme süresi dolan siparişleri iptal eder, kapanış saati geçen dalgayı kapatıp iadeleri
-yazar, teslim tarihi geçen dalgayı "teslim edildi" yapar, vadesi geçen borcu "gecikmiş" işaretler, vade ve
-dalga kapanış hatırlatmalarını gönderir, e-posta/WhatsApp kuyruğunu boşaltır. Uzun ömürlü sunucuda dakikada bir
+İdempotent işler: ödeme süresi dolan siparişleri iptal eder, kapanış saati geçen dalgayı kapatıp farkları
+üyelere döndürür, teslim tarihi geçen dalgayı "teslim edildi" yapar, vadesi geçen borcu "gecikmiş" işaretler, vade
+ve dalga kapanış hatırlatmalarını gönderir, bekleyen karta iadeleri gönderir, itiraz süresi dolan kalemleri
+serbest bırakır (ürün onayı), e-posta/WhatsApp kuyruğunu boşaltır. Tüm tarih hesapları Türkiye saatine
+(Europe/Istanbul) göredir; sunucu UTC'de çalışsa da dalga kapanışı ve ay sınırları kaymaz. Uzun ömürlü sunucuda dakikada bir
 kendiliğinden çalışır. Sunucusuz ortamda `GET /api/v1/cron/maintenance` uç noktası (`Authorization: Bearer $CRON_SECRET`)
 zamanlanmış görevle çağrılır.
 

@@ -16,9 +16,11 @@ import { activeWaveDTO, DAY, itemFacts, lastMonths, monthKey, type ItemFact } fr
 import { audit, type Actor } from '../audit';
 import { notify } from '../notify';
 import { applyOrderChange, kickRefunds } from './money-flow';
-import { formatTRY, trMonthStart } from '@havuz/core';
+import { FINANCING_FEE_TO_SUPPLIER, formatTRY, FUNDING_COST_SHARE, trMonthStart } from '@havuz/core';
+import { marketplaceEnabled } from '../payments';
 import { isNotNull, isNull } from 'drizzle-orm';
 import { payoutStatus } from './payout-profile';
+import { missingInvoiceCounts } from './invoices';
 
 const volume = (fs: ItemFact[]) => fs.reduce((a, f) => a + f.qty * f.finalUnitPrice, 0);
 const commission = (fs: ItemFact[]) => fs.reduce((a, f) => a + Math.round((f.qty * f.finalUnitPrice * f.commissionBps) / 10_000), 0);
@@ -43,11 +45,14 @@ export async function adminOverview(db: DB): Promise<AdminOverviewDTO> {
   const sponsoredMonthly = sp?.v ?? 0;
   const [pro] = await db.select({ n: count() }).from(s.organizations).where(and(eq(s.organizations.type, 'member'), eq(s.organizations.plan, 'pro')));
 
+  // Pazaryerinde vade farkı (varsayılan) tedarikçiye gider; standart modda finansman ortağı payı düşülür.
+  const market = marketplaceEnabled();
+  const financingShare = market ? (FINANCING_FEE_TO_SUPPLIER ? 0 : 1) : 1 - FUNDING_COST_SHARE;
   const revenue = computeRevenue({
     volumeBySupplier: [{ volume: 0, commissionBps: 0 }],
     proMembers: pro.n,
     months: 1,
-    financingFees: orders6.filter((o) => o.createdAt > d30).reduce((a, o) => a + o.financingFee, 0),
+    financingFees: Math.round(orders6.filter((o) => o.createdAt > d30).reduce((a, o) => a + o.financingFee, 0) * (financingShare / (1 - FUNDING_COST_SHARE))),
     sponsoredFees: sponsoredMonthly,
   });
   revenue.commission = commission(last30);
@@ -65,7 +70,7 @@ export async function adminOverview(db: DB): Promise<AdminOverviewDTO> {
   }
   for (const o of orders6) {
     const i = idx[monthKey(o.createdAt)];
-    if (i !== undefined) monthly[i].revenue += Math.round(o.financingFee * 0.4);
+    if (i !== undefined) monthly[i].revenue += Math.round(o.financingFee * financingShare);
   }
   for (const sb of subs6) {
     const i = idx[monthKey(sb.periodStart)];
@@ -164,6 +169,7 @@ export async function adminSuppliers(db: DB): Promise<AdminSupplierDTO[]> {
     .where(gt(s.issues.createdAt, d90))
     .groupBy(s.orderItems.supplierId);
   const oc = Object.fromEntries(offerCounts.map((r) => [r.supplierId, r.n]));
+  const missing = await missingInvoiceCounts(db);
   const ic = Object.fromEntries(issueCounts.map((r) => [r.supplierId, r.n]));
   // Serbest bırakılmış ama henüz hakediş belgesine girmemiş tedarikçi payları
   const unsettled = await db
@@ -188,6 +194,7 @@ export async function adminSuppliers(db: DB): Promise<AdminSupplierDTO[]> {
       district: x.district,
       pendingPayout: unsettled.filter((u) => u.supplierId === x.id).reduce((a, u) => a + (u.supplierShare ?? 0), 0),
       payout: payoutStatus(x),
+      missingInvoices: missing[x.id] ?? 0,
     }))
     .sort((p, q) => q.gmv90 - p.gmv90);
 }

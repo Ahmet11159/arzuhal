@@ -111,7 +111,7 @@ export function TierDemo() {
           );
         })}
         <p className="pt-2 text-xs text-fg-subtle">
-          Dalga kapanınca nihai kademe herkese uygulanır. Erken sipariş verip daha yüksek ödeyenlere fark otomatik olarak kredi olarak iade edilir.
+          Dalga kapanınca nihai kademe herkese uygulanır. Erken sipariş verip daha yüksek ödeyenlere fark otomatik olarak kartlarına iade edilir.
         </p>
       </ol>
     </div>

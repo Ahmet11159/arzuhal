@@ -14,6 +14,8 @@ import { CategoryIcon } from '@/components/ui/icon';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/empty';
 import { cn } from '@/lib/cn';
+import { ProductVisual } from '@/components/ui/product-visual';
+import { compressImage } from '@/lib/image';
 
 export default function AdminCatalogPage() {
   const { data, isLoading, error, refetch } = useAdminProducts();
@@ -65,9 +67,14 @@ export default function AdminCatalogPage() {
                 {list.map((p) => (
                   <tr key={p.id} className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/30" onClick={() => setEdit(p)}>
                     <td className="px-5 py-3">
-                      <div className="font-medium">{p.name}</div>
-                      <div className="text-xs text-fg-subtle">
-                        <span className="font-mono">{p.sku}</span> · {p.packLabel}
+                      <div className="flex items-center gap-3">
+                        <ProductVisual imageUrl={p.imageUrl} icon={p.category.icon} size="sm" alt={p.name} />
+                        <div>
+                          <div className="font-medium">{p.name}</div>
+                          <div className="text-xs text-fg-subtle">
+                            <span className="font-mono">{p.sku}</span> · {p.packLabel}
+                          </div>
+                        </div>
                       </div>
                     </td>
                     <td className="px-3 py-3">
@@ -102,8 +109,12 @@ function ProductSheet({ value, onClose }: { value: AdminProductDTO | 'new' | nul
   const update = useUpdateProduct();
   const editing = value && value !== 'new' ? value : null;
   const [f, setF] = useState({ categoryId: '', name: '', unit: '', packLabel: '', description: '', vatRate: '1', marketPrice: '' });
+  // undefined: değişmedi · null: kaldırıldı · string: yeni fotoğraf
+  const [image, setImage] = useState<string | null | undefined>(undefined);
+  const [imgBusy, setImgBusy] = useState(false);
   useEffect(() => {
     if (!value) return;
+    setImage(undefined);
     setF(
       editing
         ? { categoryId: editing.category.id, name: editing.name, unit: editing.unit, packLabel: editing.packLabel, description: editing.description, vatRate: String(editing.vatRate), marketPrice: String(toLira(editing.marketPrice)) }
@@ -122,6 +133,7 @@ function ProductSheet({ value, onClose }: { value: AdminProductDTO | 'new' | nul
       description: f.description,
       vatRate: Number(f.vatRate) as 1 | 10 | 20,
       marketPrice: toKurus(Number(f.marketPrice)),
+      ...(image !== undefined ? { image } : {}),
     };
     try {
       if (editing) await update.mutateAsync({ id: editing.id, input });
@@ -148,6 +160,46 @@ function ProductSheet({ value, onClose }: { value: AdminProductDTO | 'new' | nul
       }
     >
       <div className="space-y-4">
+        <Field label="Ürün fotoğrafı" hint="İsteğe bağlı · telefondan çekilen fotoğraf otomatik küçültülür">
+          <div className="flex items-center gap-4">
+            {image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={image} alt="" className="h-20 w-20 rounded-2xl object-cover ring-1 ring-border" />
+            ) : image === undefined && editing?.imageUrl ? (
+              <ProductVisual imageUrl={editing.imageUrl} icon={editing.category.icon} size="xl" />
+            ) : (
+              <div className="grid h-20 w-20 place-items-center rounded-2xl border border-dashed border-border text-xs text-fg-subtle">Fotoğraf yok</div>
+            )}
+            <div className="flex flex-col gap-2">
+              <label className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-primary-soft px-3 py-2 text-sm font-medium text-primary">
+                {imgBusy ? 'İşleniyor…' : 'Fotoğraf seç'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setImgBusy(true);
+                    try {
+                      setImage(await compressImage(file, 800, 0.82, 290_000));
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : 'Fotoğraf işlenemedi');
+                    } finally {
+                      setImgBusy(false);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </label>
+              {(image || (image === undefined && editing?.imageUrl)) && (
+                <button type="button" onClick={() => setImage(null)} className="text-xs text-danger hover:underline">
+                  Fotoğrafı kaldır
+                </button>
+              )}
+            </div>
+          </div>
+        </Field>
         <Field label="Kategori">
           <Select value={f.categoryId} onChange={set('categoryId')}>
             {cats.data?.categories.map((c) => (

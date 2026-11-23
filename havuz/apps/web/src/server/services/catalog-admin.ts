@@ -1,5 +1,5 @@
 import 'server-only';
-import { asc, count, eq, like, max, min, sql } from 'drizzle-orm';
+import { asc, count, eq, getTableColumns, like, max, min, sql } from 'drizzle-orm';
 import {
   createCategoryInput,
   createOfferInput,
@@ -7,6 +7,7 @@ import {
   formatTRY,
   updateProductInput,
   type AdminProductDTO,
+  productImageUrl,
 } from '@havuz/core';
 import type { DB } from '../db/client';
 import * as s from '../db/schema';
@@ -29,7 +30,8 @@ const slugify = (t: string) =>
 export async function adminProducts(db: DB): Promise<AdminProductDTO[]> {
   const rows = await db
     .select({
-      p: s.products,
+      p: getTableColumns(s.products),
+      imageVersion: sql<string | null>`left(md5(${s.products.image}), 10)`,
       c: s.categories,
       offerCount: count(s.offers.id),
       bestPrice: min(s.offers.basePrice),
@@ -48,6 +50,7 @@ export async function adminProducts(db: DB): Promise<AdminProductDTO[]> {
     description: r.p.description,
     vatRate: r.p.vatRate,
     marketPrice: r.p.marketPrice,
+    imageUrl: productImageUrl(r.p.id, r.imageVersion),
     category: { id: r.c.id, name: r.c.name, icon: r.c.icon },
     offerCount: r.offerCount,
     bestPrice: r.bestPrice ?? null,
@@ -91,7 +94,7 @@ export async function updateProduct(db: DB, id: string, raw: unknown, actor: Act
   await db.transaction(async (tx) => {
     const [p] = await tx.update(s.products).set(input).where(eq(s.products.id, id)).returning();
     if (!p) throw notFound('Ürün');
-    await audit(tx, actor, 'product.update', 'product', id, `Ürün güncellendi: ${p.name} (${Object.keys(input).join(', ')})`, {
+    await audit(tx, actor, 'product.update', 'product', id, `Ürün güncellendi: ${p.name} (${Object.keys(input).map((k) => (k === 'image' ? (input.image ? 'fotoğraf' : 'fotoğraf kaldırıldı') : k)).join(', ')})`, {
       ...(input.marketPrice ? { marketPrice: input.marketPrice } : {}),
     });
   });

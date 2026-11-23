@@ -25,7 +25,7 @@ export default function AdminIssues() {
   async function act(id: string, status: 'resolved' | 'rejected') {
     try {
       await resolve.mutateAsync({ id, input: { status } });
-      toast.success(status === 'resolved' ? 'Onaylandı, üyeye kredi yazıldı' : 'Bildirim reddedildi');
+      toast.success(status === 'resolved' ? 'Onaylandı; tutar üyeye iade ediliyor' : 'Bildirim reddedildi');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Hata');
     }
@@ -35,7 +35,7 @@ export default function AdminIssues() {
     <div>
       <PageHeader
         title="Mal kabul bildirimleri"
-        description="Üyelerin eksik, hasarlı veya kalitesiz ürün bildirimleri. Onaylananlar KDV dahil bedeliyle krediye dönüşür."
+        description="Üyelerin eksik, hasarlı veya kalitesiz ürün bildirimleri. Onaylananların KDV dahil bedeli üyeye döner: ödenmiş siparişte karta iade, vadelide borçtan düşüm; tedarikçinin payından düşülür."
         action={
           <Segmented
             value={tab}

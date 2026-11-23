@@ -138,7 +138,7 @@ export function LoginView() {
 function FloatingCards() {
   const cards = [
     { t: 'Dalga kademesi açıldı', s: 'Ayçiçek yağı → ₺1.800', c: 'text-[#5ef0c4]', x: '8%', y: '10%', d: 0 },
-    { t: 'Kredi hesabınıza geçti', s: '+₺1.240 kademe iadesi', c: 'text-[#f5b453]', x: '46%', y: '24%', d: 0.8 },
+    { t: 'Kartınıza iade edildi', s: '+₺1.240 kademe farkı', c: 'text-[#f5b453]', x: '46%', y: '24%', d: 0.8 },
     { t: 'Sipariş yolda', s: '3 tedarikçi · 12 kalem', c: 'text-white', x: '14%', y: '40%', d: 1.6 },
   ];
   return (

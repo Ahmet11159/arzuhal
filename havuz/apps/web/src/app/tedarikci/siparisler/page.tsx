@@ -3,7 +3,8 @@
 import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { toast } from 'sonner';
-import { Check, ClipboardList, Truck, Waves, X, Zap } from 'lucide-react';
+import { Check, ClipboardList, FileUp, Truck, Waves, X, Zap } from 'lucide-react';
+import { InvoiceSheet } from '@/components/invoice/invoice-sheet';
 import { formatTRY, ITEM_STATUS_LABEL, ITEM_TRANSITIONS, PAYOUT_STATUS_LABEL, type ItemStatus, type SupplierOrderItemDTO } from '@havuz/core';
 import { useSupplierItems, useUpdateSupplierItem } from '@havuz/sdk';
 import { PageHeader } from '@/components/app/page-header';
@@ -28,6 +29,19 @@ export default function SupplierOrders() {
   const update = useUpdateSupplierItem();
   const [tab, setTab] = useState<Tab>('pending');
   const [busy, setBusy] = useState(false);
+  const [invoiceFor, setInvoiceFor] = useState<{ orderId: string; orderNumber: string; member: string } | null>(null);
+
+  // Teslim edilmiş ama faturası yüklenmemiş siparişler (sipariş başına bir fatura)
+  const needInvoice = useMemo(() => {
+    const m = new Map<string, { orderId: string; orderNumber: string; member: string; total: number }>();
+    for (const i of data?.items ?? []) {
+      if (i.status !== 'delivered' || i.invoiceUploaded) continue;
+      const e = m.get(i.orderId) ?? { orderId: i.orderId, orderNumber: i.orderNumber, member: i.member.name, total: 0 };
+      e.total += i.qty * i.unitPrice;
+      m.set(i.orderId, e);
+    }
+    return [...m.values()];
+  }, [data]);
 
   const counts = useMemo(() => {
     const c = { pending: 0, confirmed: 0, shipped: 0, done: 0 };
@@ -95,6 +109,25 @@ export default function SupplierOrders() {
           { value: 'done', label: 'Tamamlanan' },
         ]}
       />
+      {tab === 'done' && needInvoice.length > 0 && (
+        <Card className="mb-4 overflow-hidden border-warning/30">
+          <div className="border-b border-border bg-warning-soft/60 px-5 py-3 text-sm font-semibold text-warning">
+            Faturası yüklenmemiş teslimatlar · {needInvoice.length}
+          </div>
+          <ul className="divide-y divide-border">
+            {needInvoice.slice(0, 30).map((o) => (
+              <li key={o.orderId} className="flex flex-wrap items-center gap-3 px-5 py-2.5 text-sm">
+                <span className="font-mono text-xs">{o.orderNumber}</span>
+                <span className="min-w-0 flex-1 truncate text-fg-muted">{o.member}</span>
+                <span className="text-xs text-fg-subtle tabular">KDV hariç {formatTRY(o.total)}</span>
+                <Button size="sm" variant="secondary" onClick={() => setInvoiceFor(o)}>
+                  <FileUp className="h-3.5 w-3.5" /> Fatura yükle
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       {error ? (
         <ErrorState message={error.message} onRetry={() => refetch()} />
       ) : isLoading ? (
@@ -182,6 +215,7 @@ export default function SupplierOrders() {
           </AnimatePresence>
         </div>
       )}
+      <InvoiceSheet target={invoiceFor} onClose={() => setInvoiceFor(null)} />
     </div>
   );
 }

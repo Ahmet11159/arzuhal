@@ -109,3 +109,10 @@ export const PAYOUT_STATUS_LABEL = {
   settled: 'Hakedişe girdi',
   cancelled: 'İptal',
 } as const;
+
+/** Yasal metinlerin sürümü (onaylarda kaydedilir). Metin değişince güncellenir. */
+export const LEGAL_VERSION = '2026-11-24';
+
+/** Ürün fotoğrafının önbellekli adresi (sürüm değişince tarayıcı yenisini alır). */
+export const productImageUrl = (productId: string, version: string | null | undefined) =>
+  version ? `/api/v1/catalog/products/${productId}/image?v=${version}` : null;

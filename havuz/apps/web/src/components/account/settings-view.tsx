@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { KeyRound, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { passwordProblem, type CreatedAccountDTO } from '@havuz/core';
 import { SupplierPayoutCard } from '@/components/payout/payout-profile-form';
+import { CompanyCard } from '@/components/admin/company-card';
 import { ApiError, useChangePassword, useInviteUser, useSetUserActive, useSettings, useUpdateProfile } from '@havuz/sdk';
 import { PageHeader } from '@/components/app/page-header';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -86,6 +87,8 @@ export function SettingsView() {
         <PasswordCard />
 
         {isSupplier && <SupplierPayoutCard owner={owner} />}
+
+        {data.org.type === 'operator' && <CompanyCard />}
 
         <Card className="overflow-hidden xl:col-span-2">
           <CardHeader

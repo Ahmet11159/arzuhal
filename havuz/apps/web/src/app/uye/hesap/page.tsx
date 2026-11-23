@@ -40,7 +40,7 @@ export default function AccountPage() {
       <Suspense>
         <PaymentResultToast />
       </Suspense>
-      <PageHeader title="Hesap" description="Kredi bakiyeniz, vadeli ödemeleriniz, aylık hesap özetiniz ve üyeliğiniz." />
+      <PageHeader title="Hesap" description="Size dönen tutarlar, karta iadeler, vadeli ödemeleriniz, aylık hesap özetiniz ve üyeliğiniz." />
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-1">

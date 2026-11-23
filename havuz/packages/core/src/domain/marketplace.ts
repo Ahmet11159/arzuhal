@@ -16,6 +16,13 @@ import { applyBps, type Kurus } from '../money';
  * ödenmiş siparişte karta kısmi iade, ödenmemiş siparişte borçtan düşüm olarak uygulanır.
  */
 
+/**
+ * Vade farkı kime gider? Pazaryerinde vadeli siparişin parası üye ödeyince tedarikçiye geçer; vadeyi
+ * (bekleme ve tahsilat riskini) tedarikçi taşıdığı için vade farkı da tedarikçinin payına eklenir.
+ * false yapılırsa vade farkı Havuz'da kalır (tedarikçi payından hariç tutulur).
+ */
+export const FINANCING_FEE_TO_SUPPLIER = true;
+
 /** Teslimden sonra mal kabul sorunu bildirilebilecek süre; dolunca tedarikçi ödemesi serbest kalır. */
 export const ISSUE_REPORT_WINDOW_HOURS = 48;
 
@@ -141,7 +148,7 @@ export function computeCharges(items: ChargeLineInput[], financingBps: number): 
       charge,
       commission,
       commissionVat,
-      supplierShare: Math.max(0, charge - commission - commissionVat),
+      supplierShare: Math.max(0, charge - commission - commissionVat - (FINANCING_FEE_TO_SUPPLIER ? 0 : shares[k])),
     };
   });
   return {

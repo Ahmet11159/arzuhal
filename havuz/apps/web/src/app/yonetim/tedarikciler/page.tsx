@@ -66,6 +66,7 @@ export default function AdminSuppliers() {
                 <span className="text-fg-muted">Bekleyen hakediş</span>
                 <span className="font-semibold tabular">{formatTRY(s.pendingPayout)}</span>
               </div>
+              {s.missingInvoices > 0 && <div className="mt-2 text-xs text-warning">{s.missingInvoices} teslimatın faturası yüklenmemiş (3+ gün)</div>}
               <div className="mt-2 flex items-center justify-between gap-2">
                 <PayoutStatusBadge p={{ status: s.payout, marketplace: true }} />
                 <button

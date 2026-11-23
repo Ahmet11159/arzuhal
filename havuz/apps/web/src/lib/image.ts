@@ -2,7 +2,7 @@
  * Fotoğrafı tarayıcıda küçültüp JPEG data URL'e çevirir (en uzun kenar ≤ maxSize).
  * Telefon kamerasından gelen 5–10 MB görselleri ~100–250 KB'a indirir.
  */
-export async function compressImage(file: File, maxSize = 1280, quality = 0.8): Promise<string> {
+export async function compressImage(file: File, maxSize = 1280, quality = 0.8, maxChars = 650_000): Promise<string> {
   if (!file.type.startsWith('image/')) throw new Error('Lütfen bir görsel seçin');
   const bitmap = await createImageBitmap(file).catch(() => null);
   const src = bitmap ?? (await loadImage(file));
@@ -18,8 +18,8 @@ export async function compressImage(file: File, maxSize = 1280, quality = 0.8): 
   bitmap?.close();
   let out = canvas.toDataURL('image/jpeg', quality);
   // Sınırı aşarsa kaliteyi düşürerek tekrar dene
-  for (let q = quality - 0.15; out.length > 650_000 && q > 0.3; q -= 0.15) out = canvas.toDataURL('image/jpeg', q);
-  if (out.length > 650_000) throw new Error('Fotoğraf çok büyük');
+  for (let q = quality - 0.15; out.length > maxChars && q > 0.3; q -= 0.15) out = canvas.toDataURL('image/jpeg', q);
+  if (out.length > maxChars) throw new Error('Fotoğraf çok büyük');
   return out;
 }
 

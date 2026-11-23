@@ -25,7 +25,7 @@ export default function AdminOverview() {
     { key: 'subscriptions', label: 'Pro üyelik', value: r.subscriptions },
     { key: 'financing', label: 'Finansman (net vade farkı)', value: r.financing },
     { key: 'sponsored', label: 'Sponsorlu ürün', value: r.sponsored },
-  ];
+  ].filter((x) => x.key !== 'financing' || x.value > 0); // pazaryerinde vade farkı tedarikçiye gider
 
   return (
     <div className="space-y-6">

@@ -1,6 +1,6 @@
 import 'server-only';
 import { count, eq } from 'drizzle-orm';
-import { leadInput, type PublicStatsDTO } from '@havuz/core';
+import { LEGAL_VERSION, leadInput, type PublicStatsDTO } from '@havuz/core';
 import type { DB } from '../db/client';
 import * as s from '../db/schema';
 import { activeWaveDTO, DAY, itemFacts } from './common';
@@ -26,7 +26,11 @@ export async function publicStats(db: DB): Promise<PublicStatsDTO> {
 export async function createLead(db: DB, raw: unknown) {
   const input = leadInput.parse(raw);
   await db.transaction(async (tx) => {
-    const [lead] = await tx.insert(s.leads).values({ ...input, monthlySpend: input.monthlySpend ?? null }).returning();
+    const { kvkkConsent: _consent, ...rest } = input;
+    const [lead] = await tx
+      .insert(s.leads)
+      .values({ ...rest, monthlySpend: input.monthlySpend ?? null, consentAt: new Date(), consentVersion: LEGAL_VERSION })
+      .returning();
     const { notifyNewLead } = await import('./accounts');
     await notifyNewLead(tx, lead);
   });

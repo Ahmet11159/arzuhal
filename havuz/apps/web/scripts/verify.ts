@@ -344,10 +344,30 @@ async function main() {
   check('geçerli ödeme bilgileri kaydedilir ve iyzico (test) kaydı korunur', okProf.status === 200 && okProf.body.status.registered === true, okProf.body);
 
   // ------------------------------------------------------------------
+  section('Tedarikçi faturası');
+  const invOrder = mo; // teslim edilmiş vadeli sipariş (Mal kabul bölümünden)
+  const pdf = `data:application/pdf;base64,${Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF').toString('base64')}`;
+  const invBody = { orderId: invOrder.id, number: 'TST2026000000001', issuedAt: new Date().toISOString(), amount: invOrder.total, fileName: 'fatura.pdf', file: pdf };
+  check('başka tedarikçi bu siparişe fatura yükleyemez (404)', (await api(t.supplier2, 'POST', '/supplier/invoices', invBody)).status === 404);
+  check('zararlı dosya türü reddedilir', (await api(t.supplier1, 'POST', '/supplier/invoices', { ...invBody, file: 'data:text/html;base64,PHNjcmlwdD4=' })).status === 422);
+  const inv = await api(t.supplier1, 'POST', '/supplier/invoices', invBody);
+  check('tedarikçi faturayı yükler', inv.status === 200 && !!inv.body.id, inv.body);
+  const invSeen = (await getOrder(t.memberA, invOrder.id)).invoices;
+  check('işletme sipariş sayfasında faturayı görür', invSeen.length === 1 && invSeen[0].number === 'TST2026000000001' && invSeen[0].mime === 'application/pdf');
+  const dl = await fetch(`${BASE}/api/v1/invoices/${inv.body.id}/file`, { headers: { Authorization: `Bearer ${t.memberA}` } });
+  check('işletme dosyayı indirir (PDF)', dl.status === 200 && dl.headers.get('content-type') === 'application/pdf' && (await dl.text()).startsWith('%PDF'));
+  check('başka işletme faturayı indiremez (404)', (await fetch(`${BASE}/api/v1/invoices/${inv.body.id}/file`, { headers: { Authorization: `Bearer ${t.memberB}` } })).status === 404);
+  check('yeniden yükleme eskisinin yerine geçer', (await api(t.supplier1, 'POST', '/supplier/invoices', { ...invBody, number: 'TST2026000000002' })).status === 200 && (await getOrder(t.memberA, invOrder.id)).invoices.map((v) => v.number).join() === 'TST2026000000002');
+  check('işletmeye "fatura yüklendi" bildirimi', (await api(t.memberA, 'GET', '/notifications')).body.notifications.some((n: { type: string }) => n.type === 'invoice.uploaded'));
+  check('tedarikçi listesinde sipariş "faturalı" görünür', ((await api(t.supplier1, 'GET', '/supplier/items')).body.items as { orderId: string; invoiceUploaded: boolean }[]).filter((i) => i.orderId === invOrder.id).every((i) => i.invoiceUploaded));
+
+  // ------------------------------------------------------------------
   section('Hesap yönetimi: hesap açma, geçici şifre, ekip, oturum iptali');
   const uniq = Date.now();
   const newEmail = `pilot-${uniq}@ornek.demo`;
-  const lead = await api(null, 'POST', '/public/leads', { businessName: `Pilot Kafe ${uniq}`, contactName: 'Pilot Sahip', phone: '0532 000 00 00', email: newEmail, city: 'İstanbul', businessType: 'cafe' });
+  const leadBody = { businessName: `Pilot Kafe ${uniq}`, contactName: 'Pilot Sahip', phone: '0532 000 00 00', email: newEmail, city: 'İstanbul', businessType: 'cafe' };
+  check('KVKK onayı olmadan başvuru reddedilir (422)', (await api(null, 'POST', '/public/leads', leadBody)).status === 422);
+  const lead = await api(null, 'POST', '/public/leads', { ...leadBody, kvkkConsent: true });
   check('başvuru alındı', lead.status === 200);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const leadRow = ((await api(t.admin, 'GET', '/admin/leads')).body.leads as any[]).find((l) => l.email === newEmail);
@@ -391,12 +411,36 @@ async function main() {
   check('IBAN yalnızca tedarikçide tutulur', (await api(t.memberA, 'PATCH', '/account/profile', { iban: 'TR330006100519786457841326' })).status === 400);
 
   // ------------------------------------------------------------------
+  section('Yasal sayfalar ve şirket bilgileri');
+  const legalPaths = ['/kvkk', '/gizlilik', '/kullanim-kosullari', '/satis-sozlesmesi', '/iptal-iade', '/hakkimizda', '/iletisim'];
+  const legalStatus = await Promise.all(legalPaths.map((p) => fetch(`${BASE}${p}`).then((r) => r.status)));
+  check('7 yasal sayfa herkese açık (200)', legalStatus.every((x) => x === 200), legalStatus);
+  check('üye şirket bilgilerini değiştiremez (403)', (await api(t.memberA, 'PUT', '/admin/company', {})).status === 403);
+  check('eksik şirket bilgisi reddedilir (422)', (await api(t.admin, 'PUT', '/admin/company', { legalName: 'X' })).status === 422);
+  const company = { legalName: `Havuz Teknoloji A.Ş. ${uniq}`, brandName: 'Havuz', address: 'Caferağa Mah. Moda Cad. No:1 Kadıköy/İstanbul', phone: '0216 000 00 00', email: 'destek@havuz.app', taxOffice: 'Kadıköy', taxNo: '1234567890' };
+  check('yönetim şirket bilgilerini kaydeder', (await api(t.admin, 'PUT', '/admin/company', company)).status === 200);
+  const kvkkHtml = await fetch(`${BASE}/kvkk`).then((r) => r.text());
+  check('KVKK metninde veri sorumlusu unvanı görünür', kvkkHtml.includes(company.legalName));
+  const footerHtml = await fetch(`${BASE}/`).then((r) => r.text());
+  check('ana sayfa alt bilgisinde yasal bağlantılar var', ['/kvkk', '/kullanim-kosullari', '/iptal-iade', '/iletisim'].every((p) => footerHtml.includes(`href="${p}"`)));
+
+  // ------------------------------------------------------------------
   section('Katalog yönetimi ve yeni teklif');
   const cats = (await api(t.admin, 'GET', '/catalog/categories')).body.categories;
   const newProd = await api(t.admin, 'POST', '/admin/products', { categoryId: cats[0].id, name: `Test Ürünü ${uniq}`, unit: 'kg', packLabel: '1 kg paket', vatRate: 1, marketPrice: 10_000 });
   check('yönetim ürün kartı ekler, SKU otomatik', newProd.status === 200 && /^[A-Z]{2}-\d{3}$/.test(newProd.body.sku), newProd.body);
   check('üye ürün ekleyemez (403)', (await api(t.memberA, 'POST', '/admin/products', {})).status === 403);
   check('piyasa fiyatı güncellenir', (await api(t.admin, 'PATCH', `/admin/products/${newProd.body.id}`, { marketPrice: 12_000 })).status === 200);
+  // 1×1 PNG
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  check('zararlı ürün görseli reddedilir', (await api(t.admin, 'PATCH', `/admin/products/${newProd.body.id}`, { image: 'data:text/html;base64,PHNjcmlwdD4=' })).status === 422);
+  check('yönetim ürün fotoğrafı yükler', (await api(t.admin, 'PATCH', `/admin/products/${newProd.body.id}`, { image: png })).status === 200);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const withImg = ((await api(t.memberA, 'GET', `/catalog/products?q=${encodeURIComponent(`Test Ürünü ${uniq}`)}`)).body.products as any[])[0];
+  check('katalogda fotoğraf adresi var, fotoğrafın kendisi listede taşınmaz', typeof withImg?.imageUrl === 'string' && withImg.imageUrl.includes('?v=') && !JSON.stringify(withImg).includes('base64'), withImg?.imageUrl);
+  const imgRes = await fetch(`${BASE}${withImg.imageUrl}`);
+  check('fotoğraf adresi görseli uzun süreli önbellekle döner', imgRes.status === 200 && imgRes.headers.get('content-type') === 'image/png' && (imgRes.headers.get('cache-control') ?? '').includes('immutable'));
+  check('fotoğraf kaldırılır', (await api(t.admin, 'PATCH', `/admin/products/${newProd.body.id}`, { image: null })).status === 200 && (await fetch(`${BASE}${withImg.imageUrl}`)).status === 404);
   check('kademe taban fiyattan pahalı olamaz', (await api(t.supplier1, 'POST', '/supplier/offers', { productId: newProd.body.id, basePrice: 9_000, stock: 100, tiers: [{ minQty: 10, unitPrice: 9_500 }] })).status === 422);
   const offer = await api(t.supplier1, 'POST', '/supplier/offers', { productId: newProd.body.id, basePrice: 9_000, stock: 100, tiers: [{ minQty: 10, unitPrice: 8_500 }] });
   check('tedarikçi yeni ürüne teklif açar', offer.status === 200);

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CheckCircle2 } from 'lucide-react';
@@ -28,6 +29,7 @@ export function LeadForm() {
       city: String(fd.get('city') ?? ''),
       businessType: String(fd.get('businessType') ?? 'cafe') as BusinessType,
       monthlySpend: spend ? toKurus(spend) : undefined,
+      kvkkConsent: fd.get('kvkkConsent') === 'on',
     };
     const parsed = leadInput.safeParse(raw);
     if (!parsed.success) {
@@ -101,6 +103,17 @@ export function LeadForm() {
                 <Input name="monthlySpend" type="number" inputMode="numeric" min={0} placeholder="250000" />
               </Field>
             )}
+            <label className="flex cursor-pointer items-start gap-2.5 text-[13px] leading-snug text-fg-muted">
+              <input type="checkbox" name="kvkkConsent" className="mt-0.5 h-4 w-4 shrink-0 accent-[rgb(var(--primary))]" />
+              <span>
+                Kişisel verilerimin başvurumun değerlendirilmesi için işlenmesine ilişkin{' '}
+                <Link href="/kvkk" target="_blank" className="font-medium text-fg underline underline-offset-2">
+                  aydınlatma metnini
+                </Link>{' '}
+                okudum.
+              </span>
+            </label>
+            {errors.kvkkConsent && <p className="-mt-2 text-xs text-danger">{errors.kvkkConsent}</p>}
             {errors.form && <p className="text-sm text-danger">{errors.form}</p>}
             <Button type="submit" size="lg" className="w-full" loading={apply.isPending}>
               Başvuruyu gönder

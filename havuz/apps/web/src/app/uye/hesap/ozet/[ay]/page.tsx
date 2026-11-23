@@ -156,7 +156,7 @@ export default function StatementPage({ params }: { params: { ay: string } }) {
             </>
           )}
           <p className="border-t border-border pt-4 text-xs text-fg-subtle">
-            Bu belge bilgilendirme amaçlı hesap özetidir. Yasal e-Fatura, e-Fatura entegratörü üzerinden ayrıca düzenlenir. Tutarlar sipariş anındaki fiyatlardır; dalga kademe iadeleri kredi olarak ayrıca yansıtılır.
+            Bu belge bilgilendirme amaçlı hesap özetidir. Yasal e-Fatura, e-Fatura entegratörü üzerinden ayrıca düzenlenir. Ürün faturalarını tedarikçiler düzenler ve sipariş sayfasına yükler. Tutarlar tahsil edilen tutarlardır; sonradan yapılan karta iadeler ayrıca gösterilir.
           </p>
         </CardBody>
       </Card>

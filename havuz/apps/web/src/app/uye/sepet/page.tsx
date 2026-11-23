@@ -24,7 +24,6 @@ import { PageHeader } from '@/components/app/page-header';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
-import { CategoryIcon } from '@/components/ui/icon';
 import { EmptyState } from '@/components/ui/empty';
 import { Skeleton } from '@/components/ui/skeleton';
 import { QtyStepper } from '@/components/app/qty-stepper';
@@ -32,6 +31,7 @@ import { offerUnitPrice } from '@/components/catalog/pricing';
 import { useCart } from '@/stores/cart';
 import { usePay } from '@/components/payment/use-pay';
 import { cn } from '@/lib/cn';
+import { ProductVisual } from '@/components/ui/product-visual';
 
 interface Line {
   offer: OfferDTO;
@@ -180,7 +180,7 @@ export default function CartPage() {
                 <div>
                   <div className="text-sm font-semibold">Teslimat şekli</div>
                   <div className="text-xs text-fg-muted">
-                    {mode === 'wave' ? 'Havuz fiyatı, dalga kapanınca nihai kademe uygulanır; fark kredinize iade edilir.' : 'Taban fiyatla, tedarikçinin teslim süresinde gelir.'}
+                    {mode === 'wave' ? 'Havuz fiyatı, dalga kapanınca nihai kademe uygulanır; fark kartınıza iade edilir (vadelide borcunuzdan düşülür).' : 'Taban fiyatla, tedarikçinin teslim süresinde gelir.'}
                   </div>
                 </div>
                 <Segmented
@@ -217,7 +217,7 @@ export default function CartPage() {
                       <AnimatePresence initial={false}>
                         {g.lines.map((l) => (
                           <motion.li key={l.offer.id} layout exit={{ opacity: 0, x: -30 }} className="flex flex-wrap items-center gap-4 px-5 py-4 sm:flex-nowrap">
-                            <CategoryIcon name={l.product.category.icon} />
+                            <ProductVisual imageUrl={l.product.imageUrl} icon={l.product.category.icon} alt={l.product.name} />
                             <div className="min-w-0 flex-1">
                               <div className="truncate font-medium">{l.product.name}</div>
                               <div className="text-xs text-fg-muted">

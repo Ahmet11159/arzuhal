@@ -6,13 +6,13 @@ import { Clock, ShieldCheck, Star, Users } from 'lucide-react';
 import { formatPercent, formatTRY, nextTier, normalizeTiers, resolveTier, savingRatio, type ProductDTO } from '@havuz/core';
 import { useCart, type CartMode } from '@/stores/cart';
 import { Sheet } from '../ui/sheet';
-import { CategoryIcon } from '../ui/icon';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { QtyStepper } from '../app/qty-stepper';
 import { bestOffer, offerUnitPrice } from './pricing';
 import { cn } from '@/lib/cn';
 import { toast } from 'sonner';
+import { ProductVisual } from '../ui/product-visual';
 
 export function ProductSheet({ product, mode, onClose }: { product: ProductDTO | null; mode: CartMode; onClose: () => void }) {
   const [offerId, setOfferId] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export function ProductSheet({ product, mode, onClose }: { product: ProductDTO |
     <Sheet
       open={!!product}
       onClose={onClose}
-      title={product ? <span className="flex items-center gap-3"><CategoryIcon name={product.category.icon} size="sm" />{product.name}</span> : ''}
+      title={product ? <span className="flex items-center gap-3"><ProductVisual imageUrl={product.imageUrl} icon={product.category.icon} size="sm" />{product.name}</span> : ''}
       footer={
         offer && (
           <div className="flex items-center gap-3">

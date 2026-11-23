@@ -1,6 +1,6 @@
 import 'server-only';
 import { asc, count, eq } from 'drizzle-orm';
-import { pickBestOffer, type CategoryDTO, type ProductDTO, type ProductQuery } from '@havuz/core';
+import { pickBestOffer, type CategoryDTO, type ProductDTO, type ProductQuery, productImageUrl } from '@havuz/core';
 import type { DB } from '../db/client';
 import * as s from '../db/schema';
 import { getActiveWave, pooledForWave, waveOfferState } from './common';
@@ -20,6 +20,8 @@ const norm = (t: string) => t.toLocaleLowerCase('tr-TR');
 
 export async function listProducts(db: DB, q: ProductQuery = {}): Promise<ProductDTO[]> {
   const rows = await db.query.products.findMany({
+    columns: { image: false },
+    extras: (t, { sql }) => ({ imageVersion: sql<string | null>`left(md5(${t.image}), 10)`.as('image_version') }),
     with: { category: true, offers: { with: { supplier: true } } },
     orderBy: (p, { asc }) => [asc(p.sku)],
   });
@@ -37,6 +39,8 @@ export async function listProducts(db: DB, q: ProductQuery = {}): Promise<Produc
 export async function getProduct(db: DB, id: string): Promise<ProductDTO> {
   const p = await db.query.products.findFirst({
     where: eq(s.products.id, id),
+    columns: { image: false },
+    extras: (t, { sql }) => ({ imageVersion: sql<string | null>`left(md5(${t.image}), 10)`.as('image_version') }),
     with: { category: true, offers: { with: { supplier: true } } },
   });
   if (!p) throw notFound('Ürün');
@@ -45,7 +49,8 @@ export async function getProduct(db: DB, id: string): Promise<ProductDTO> {
   return toProductDTO(p, pooled);
 }
 
-type ProductRow = typeof s.products.$inferSelect & {
+type ProductRow = Omit<typeof s.products.$inferSelect, 'image'> & {
+  imageVersion: string | null;
   category: typeof s.categories.$inferSelect;
   offers: (typeof s.offers.$inferSelect & { supplier: typeof s.organizations.$inferSelect })[];
 };
@@ -62,6 +67,7 @@ function toProductDTO(p: ProductRow, pooled: Record<string, number> | null): Pro
     description: p.description,
     vatRate: p.vatRate,
     marketPrice: p.marketPrice,
+    imageUrl: productImageUrl(p.id, p.imageVersion),
     category: { id: p.category.id, slug: p.category.slug, name: p.category.name, icon: p.category.icon },
     bestOfferId: best?.id ?? null,
     offers: offers.map((o) => ({
