@@ -1,7 +1,7 @@
 import 'server-only';
 import { toLira } from '@havuz/core';
 import { PaymentConfigError, type CheckoutParams, type PaymentProvider } from './provider';
-import { iyzicoAuthHeaders, iyzicoGsm } from './iyzico-auth';
+import { iyzicoAuthHeaders, iyzicoGsm, iyzicoName } from './iyzico-auth';
 
 export { iyzicoAuthHeaders };
 
@@ -60,7 +60,7 @@ interface DetailResponse {
 export const iyzicoProvider: PaymentProvider = {
   name: 'iyzico',
   async createCheckout(p: CheckoutParams) {
-    const [first, ...rest] = p.buyer.name.trim().split(/\s+/);
+    const person = iyzicoName(p.buyer.name);
     const price = money(p.amount);
     const address = { contactName: p.buyer.name, city: p.buyer.city, country: 'Turkey', address: p.buyer.address };
     const r = await call<InitResponse>(INIT_PATH, {
@@ -75,8 +75,8 @@ export const iyzicoProvider: PaymentProvider = {
       enabledInstallments: [1],
       buyer: {
         id: p.buyer.id,
-        name: first || p.buyer.name,
-        surname: rest.join(' ') || first || p.buyer.name,
+        name: person.name,
+        surname: person.surname,
         gsmNumber: iyzicoGsm(p.buyer.phone),
         email: p.buyer.email,
         // iyzico 11 haneli kimlik no ister; vergi no yoksa iyzico'nun kabul ettiği yer tutucu kullanılır.

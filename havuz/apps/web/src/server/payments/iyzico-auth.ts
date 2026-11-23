@@ -19,3 +19,14 @@ export function iyzicoGsm(raw: string | null | undefined): string | undefined {
   if (d.length === 10 && d.startsWith('5')) d = '90' + d;
   return /^90\d{10}$/.test(d) ? `+${d}` : undefined;
 }
+
+/**
+ * Ad soyadı iyzico'nun istediği ad / soyad alanlarına böler. Türkçe kullanımda soyad son kelimedir:
+ * "Ali Rıza Yılmaz" → { name: "Ali Rıza", surname: "Yılmaz" }. Tek kelimede ikisi de aynı olur.
+ */
+export function iyzicoName(full: string): { name: string; surname: string } {
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { name: 'Havuz', surname: 'Üyesi' };
+  if (parts.length === 1) return { name: parts[0], surname: parts[0] };
+  return { name: parts.slice(0, -1).join(' '), surname: parts[parts.length - 1] };
+}

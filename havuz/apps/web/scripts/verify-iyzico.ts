@@ -12,6 +12,7 @@
  */
 import { createHmac } from 'node:crypto';
 import { createServer, type IncomingMessage } from 'node:http';
+import { iyzicoName } from '../src/server/payments/iyzico-auth';
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3100';
 const API_KEY = 'test-api-key';
@@ -137,6 +138,10 @@ async function main() {
   check('dönüş adresi ve eşleşme kimliği doğru', ib.callbackUrl === 'http://localhost:3100/api/v1/payments/iyzico/callback' && ib.conversationId === start.body.paymentId);
   check('telefon iyzico biçiminde (+905xxxxxxxxx) ya da hiç gönderilmiyor', ib.buyer.gsmNumber === undefined || /^\+90\d{10}$/.test(ib.buyer.gsmNumber), ib.buyer.gsmNumber);
   check('alıcı bilgileri dolu (ad, e-posta, kimlik no, şehir)', !!ib.buyer.name && !!ib.buyer.email && /^\d{11}$/.test(ib.buyer.identityNumber) && !!ib.buyer.city, ib.buyer);
+  check('soyad son kelime (Türkçe ad düzeni)', !!ib.buyer.surname && !/\s/.test(ib.buyer.surname), { name: ib.buyer.name, surname: ib.buyer.surname });
+  const n3 = iyzicoName('Ali Rıza Yılmaz');
+  const n1 = iyzicoName('  Ayşe  ');
+  check('ad soyad bölme: "Ali Rıza Yılmaz" → Ali Rıza / Yılmaz, tek kelime iki alana', n3.name === 'Ali Rıza' && n3.surname === 'Yılmaz' && n1.name === 'Ayşe' && n1.surname === 'Ayşe', { n3, n1 });
   const token1 = start.body.redirectUrl.split('/pay/')[1];
   const cb1 = await callback(token1);
   check('dönüş: 303 ile sipariş sayfasına "başarılı"', cb1.status === 303 && cb1.location.endsWith(`/uye/siparisler/${o1.id}?odeme=basarili`), cb1);
