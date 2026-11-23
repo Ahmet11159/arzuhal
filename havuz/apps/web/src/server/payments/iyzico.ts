@@ -19,9 +19,9 @@ const INIT_PATH = '/payment/iyzipos/checkoutform/initialize/auth/ecom';
 const DETAIL_PATH = '/payment/iyzipos/checkoutform/auth/ecom/detail';
 
 function config() {
-  const apiKey = process.env.IYZICO_API_KEY;
-  const secretKey = process.env.IYZICO_SECRET_KEY;
-  const baseUrl = (process.env.IYZICO_BASE_URL ?? 'https://sandbox-api.iyzipay.com').replace(/\/$/, '');
+  const apiKey = process.env.IYZICO_API_KEY?.trim();
+  const secretKey = process.env.IYZICO_SECRET_KEY?.trim();
+  const baseUrl = (process.env.IYZICO_BASE_URL?.trim() || 'https://sandbox-api.iyzipay.com').replace(/\/$/, '');
   if (!apiKey || !secretKey) throw new PaymentConfigError('IYZICO_API_KEY ve IYZICO_SECRET_KEY tanımlı olmalı');
   return { apiKey, secretKey, baseUrl };
 }

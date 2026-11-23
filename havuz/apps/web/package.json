@@ -20,6 +20,7 @@
     "@electric-sql/pglite": "^0.2.17",
     "@havuz/core": "*",
     "@havuz/sdk": "*",
+    "@next/env": "14.2.35",
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.18.0",
     "@tanstack/react-query": "^5.59.0",
