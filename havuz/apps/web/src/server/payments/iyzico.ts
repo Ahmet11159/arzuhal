@@ -1,7 +1,9 @@
 import 'server-only';
-import { createHmac, randomBytes } from 'node:crypto';
 import { toLira } from '@havuz/core';
 import { PaymentConfigError, type CheckoutParams, type PaymentProvider } from './provider';
+import { iyzicoAuthHeaders, iyzicoGsm } from './iyzico-auth';
+
+export { iyzicoAuthHeaders };
 
 /**
  * iyzico Checkout Form entegrasyonu (IYZWSv2 imzası).
@@ -22,14 +24,6 @@ function config() {
   const baseUrl = (process.env.IYZICO_BASE_URL ?? 'https://sandbox-api.iyzipay.com').replace(/\/$/, '');
   if (!apiKey || !secretKey) throw new PaymentConfigError('IYZICO_API_KEY ve IYZICO_SECRET_KEY tanımlı olmalı');
   return { apiKey, secretKey, baseUrl };
-}
-
-/** IYZWSv2: base64("apiKey:..&randomKey:..&signature:" + hex(HMAC-SHA256(secret, rnd + uriPath + body))) */
-export function iyzicoAuthHeaders(apiKey: string, secretKey: string, uriPath: string, body: string, randomKey?: string) {
-  const rnd = randomKey ?? `${Date.now()}${randomBytes(4).toString('hex')}`;
-  const signature = createHmac('sha256', secretKey).update(rnd + uriPath + body).digest('hex');
-  const auth = Buffer.from(`apiKey:${apiKey}&randomKey:${rnd}&signature:${signature}`).toString('base64');
-  return { Authorization: `IYZWSv2 ${auth}`, 'x-iyzi-rnd': rnd, 'Content-Type': 'application/json', Accept: 'application/json' };
 }
 
 /** iyzico tutarları nokta ayraçlı string ister: 1234.5 → "1234.5" */
@@ -83,7 +77,7 @@ export const iyzicoProvider: PaymentProvider = {
         id: p.buyer.id,
         name: first || p.buyer.name,
         surname: rest.join(' ') || first || p.buyer.name,
-        gsmNumber: p.buyer.phone ?? undefined,
+        gsmNumber: iyzicoGsm(p.buyer.phone),
         email: p.buyer.email,
         // iyzico 11 haneli kimlik no ister; vergi no yoksa iyzico'nun kabul ettiği yer tutucu kullanılır.
         identityNumber: p.buyer.taxNo && p.buyer.taxNo.length === 11 ? p.buyer.taxNo : '11111111111',

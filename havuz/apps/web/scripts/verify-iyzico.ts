@@ -135,6 +135,7 @@ async function main() {
   const lira = (o1.total / 100).toString();
   check('tutar sunucuda hesaplandı ve doğru biçimde gönderildi', ib.price === lira && ib.paidPrice === lira && ib.basketItems[0].price === lira, { price: ib.price, total: o1.total });
   check('dönüş adresi ve eşleşme kimliği doğru', ib.callbackUrl === 'http://localhost:3100/api/v1/payments/iyzico/callback' && ib.conversationId === start.body.paymentId);
+  check('telefon iyzico biçiminde (+905xxxxxxxxx) ya da hiç gönderilmiyor', ib.buyer.gsmNumber === undefined || /^\+90\d{10}$/.test(ib.buyer.gsmNumber), ib.buyer.gsmNumber);
   check('alıcı bilgileri dolu (ad, e-posta, kimlik no, şehir)', !!ib.buyer.name && !!ib.buyer.email && /^\d{11}$/.test(ib.buyer.identityNumber) && !!ib.buyer.city, ib.buyer);
   const token1 = start.body.redirectUrl.split('/pay/')[1];
   const cb1 = await callback(token1);
