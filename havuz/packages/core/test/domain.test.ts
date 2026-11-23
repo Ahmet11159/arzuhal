@@ -143,7 +143,10 @@ describe('gelir ve tasarruf', () => {
 describe('sözleşmeler', () => {
   it('validates order input', () => {
     expect(createOrderInput.safeParse({ items: [] }).success).toBe(false);
-    const ok = createOrderInput.parse({ items: [{ offerId: 'x', qty: 2 }] });
+    // Kullanım ve iptal-iade koşullarının onayı zorunlu
+    expect(createOrderInput.safeParse({ items: [{ offerId: 'x', qty: 2 }] }).success).toBe(false);
+    expect(createOrderInput.safeParse({ items: [{ offerId: 'x', qty: 2 }], acceptTerms: false }).success).toBe(false);
+    const ok = createOrderInput.parse({ items: [{ offerId: 'x', qty: 2 }], acceptTerms: true });
     expect(ok.paymentTerm).toBe('cash');
     expect(ok.waveId).toBeNull();
   });

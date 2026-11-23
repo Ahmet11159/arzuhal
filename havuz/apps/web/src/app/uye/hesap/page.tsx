@@ -10,6 +10,8 @@ import {
   LEDGER_TYPE_LABEL,
   PLAN_LABEL,
   PRO_MONTHLY_FEE,
+  REFUND_REASON_LABEL,
+  REFUND_STATUS_LABEL,
 } from '@havuz/core';
 import { useAccount } from '@havuz/sdk';
 import { Suspense } from 'react';
@@ -64,11 +66,11 @@ export default function AccountPage() {
         <Card className="relative overflow-hidden">
           <CardBody>
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-fg-muted">Kredi bakiyesi</span>
+              <span className="text-sm font-medium text-fg-muted">Size dönen</span>
               <PiggyBank className="h-5 w-5 text-warning" />
             </div>
-            <div className="mt-3 text-3xl font-semibold tracking-tight tabular">{formatTRY(data.creditBalance)}</div>
-            <p className="mt-2 text-xs text-fg-muted">Dalga kademe iadeleri ve onaylanan mal kabul bildirimleri. Sepette tek tıkla kullanılır.</p>
+            <div className="mt-3 text-3xl font-semibold tracking-tight tabular">{formatTRY(data.returnedTotal)}</div>
+            <p className="mt-2 text-xs text-fg-muted">Dalga kademe farkları, iptaller ve onaylanan mal kabul bildirimleri: ödenmiş siparişte kartınıza iade, vadelide borcunuzdan düşüm.</p>
           </CardBody>
         </Card>
 
@@ -190,7 +192,7 @@ export default function AccountPage() {
           </Card>
 
           <Card className="overflow-hidden">
-            <CardHeader title="Kredi hareketleri" />
+            <CardHeader title="Hesap hareketleri" description="Size dönen tutarlar" />
             <ul className="mt-3 max-h-[440px] divide-y divide-border overflow-y-auto border-t border-border">
               {data.ledger.map((e, i) => (
                 <motion.li key={e.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: Math.min(i, 10) * 0.03 }} className="flex items-center gap-3 px-5 py-3">
@@ -211,6 +213,28 @@ export default function AccountPage() {
               ))}
             </ul>
           </Card>
+
+          {data.refunds.length > 0 && (
+            <Card className="overflow-hidden">
+              <CardHeader title="Karta iadeler" description="Bankanıza göre hesabınıza yansıması birkaç iş günü sürebilir" />
+              <ul className="mt-3 max-h-[360px] divide-y divide-border overflow-y-auto border-t border-border">
+                {data.refunds.map((r) => (
+                  <li key={r.id} className="flex items-center gap-3 px-5 py-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm">{r.description}</div>
+                      <div className="text-xs text-fg-subtle">
+                        {REFUND_REASON_LABEL[r.reason]} · {fmtDate(r.createdAt)}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-semibold tabular">{formatTRY(r.amount)}</div>
+                      <Badge tone={r.status === 'succeeded' ? 'success' : r.status === 'needs_review' ? 'danger' : 'warning'}>{REFUND_STATUS_LABEL[r.status]}</Badge>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
         </div>
       </div>
     </div>

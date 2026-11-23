@@ -1,12 +1,13 @@
 import 'server-only';
 import { and, desc, eq, gt, inArray, ne, sql } from 'drizzle-orm';
-import { formatTRY, updateOfferInput, type SupplierDashboardDTO, type SupplierOfferDTO, type SupplierOrderItemDTO } from '@havuz/core';
+import { formatTRY, trMonthStart, updateOfferInput, type SupplierDashboardDTO, type SupplierOfferDTO, type SupplierOrderItemDTO } from '@havuz/core';
 import type { DB } from '../db/client';
 import * as s from '../db/schema';
 import { badRequest, notFound } from '../http';
 import type { SessionPayload } from '../auth/secret';
 import { DAY, getActiveWave, itemFacts, lastMonths, monthKey, pooledForWave } from './common';
 import { audit, type Actor } from '../audit';
+import { marketplaceEnabled } from '../payments';
 
 export async function supplierItems(db: DB, session: SessionPayload): Promise<SupplierOrderItemDTO[]> {
   const rows = await db
@@ -26,6 +27,10 @@ export async function supplierItems(db: DB, session: SessionPayload): Promise<Su
       createdAt: s.orders.createdAt,
       waveCode: s.waves.code,
       waveDelivery: s.waves.deliveryAt,
+      paymentStatus: s.orders.paymentStatus,
+      deliveredAt: s.orderItems.deliveredAt,
+      releasedAt: s.orderItems.releasedAt,
+      settlementId: s.orderItems.settlementId,
     })
     .from(s.orderItems)
     .innerJoin(s.orders, eq(s.orders.id, s.orderItems.orderId))
@@ -40,7 +45,23 @@ export async function supplierItems(db: DB, session: SessionPayload): Promise<Su
       desc(s.orders.createdAt),
     )
     .limit(300);
+  const orderIds = [...new Set(rows.map((r) => r.orderId))];
+  const invoiced = new Set(
+    orderIds.length
+      ? (await db.select({ orderId: s.invoices.orderId }).from(s.invoices).where(and(eq(s.invoices.supplierId, session.org), inArray(s.invoices.orderId, orderIds)))).map((r) => r.orderId)
+      : [],
+  );
+  const market = marketplaceEnabled();
+  const payoutStatus = (r: (typeof rows)[number]): SupplierOrderItemDTO['payoutStatus'] => {
+    if (r.status === 'cancelled') return 'cancelled';
+    if (r.settlementId) return 'settled';
+    if (r.releasedAt) return 'released';
+    if (r.status === 'delivered') return market && r.paymentStatus !== 'paid' ? 'awaiting_payment' : 'objection_period';
+    return market && r.paymentStatus !== 'paid' ? 'awaiting_payment' : 'in_progress';
+  };
   return rows.map((r) => ({
+    payoutStatus: payoutStatus(r),
+    invoiceUploaded: invoiced.has(r.orderId),
     id: r.id,
     orderId: r.orderId,
     orderNumber: r.orderNumber,
@@ -122,7 +143,7 @@ export async function supplierDashboard(db: DB, session: SessionPayload): Promis
   const sup = await db.query.organizations.findFirst({ where: eq(s.organizations.id, session.org) });
   if (!sup) throw notFound('Tedarikçi');
   const now = new Date();
-  const facts = await itemFacts(db, { since: new Date(now.getFullYear(), now.getMonth() - 5, 1), supplierId: sup.id });
+  const facts = await itemFacts(db, { since: trMonthStart(now, -5), supplierId: sup.id });
   const months = lastMonths(6, now);
   const idx = Object.fromEntries(months.map((m, i) => [m.key, i]));
   const monthly = months.map((m) => ({ month: m.label, revenue: 0 }));

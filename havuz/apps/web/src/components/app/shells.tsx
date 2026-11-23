@@ -1,23 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import {
-  AlertTriangle,
-  Banknote,
-  BookOpen,
-  History,
-  Settings,
-  ClipboardList,
-  Inbox,
-  LayoutDashboard,
-  PackageSearch,
-  ShoppingBag,
-  Store,
-  Tags,
-  Truck,
-  UserRound,
-  Waves,
-} from 'lucide-react';
+import { AlertTriangle, Banknote, BookOpen, ClipboardList, CreditCard, History, Inbox, LayoutDashboard, PackageSearch, Settings, ShoppingBag, Store, Tags, Truck, UserRound, Waves } from 'lucide-react';
 import { AppShell, type NavItem } from './app-shell';
 
 const MEMBER_NAV: NavItem[] = [
@@ -44,6 +28,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/yonetim/tedarikciler', label: 'Tedarikçiler', icon: Truck },
   { href: '/yonetim/katalog', label: 'Katalog', icon: BookOpen },
   { href: '/yonetim/hakedis', label: 'Hakedişler', icon: Banknote, mobile: true },
+  { href: '/yonetim/odemeler', label: 'Ödemeler ve iadeler', icon: CreditCard },
   { href: '/yonetim/sorunlar', label: 'Mal kabul', icon: AlertTriangle, mobile: true },
   { href: '/yonetim/basvurular', label: 'Başvurular', icon: Inbox },
   { href: '/yonetim/kayitlar', label: 'Kayıtlar', icon: History },

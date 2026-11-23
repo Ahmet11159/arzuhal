@@ -7,12 +7,13 @@
  *    dolma testleri de çalışır; sunucu HAVUZ_SCHEDULER=off ile başlatılmalıdır)
  *
  * Mobil istemcinin kullanacağı Bearer token yolunu kullanır ve sistem değişmezlerini
- * (para, stok, kredi, dalga iadesi, hakediş) eşzamanlı istekler altında da kontrol eder.
+ * (para, stok, karta iade, dalga farkı, pazaryeri payı, hakediş) eşzamanlı istekler altında da kontrol eder.
  */
 import {
   closeWave,
+  computeCharges,
   computeOrderTotals,
-  computeSettlement,
+  FINANCING_BPS,
   normalizeIban,
   resolveTier,
   TEST_CARDS,
@@ -55,6 +56,8 @@ async function api<T = any>(token: string | null, method: string, path: string, 
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined || rawBody !== undefined) headers['Content-Type'] = 'application/json';
+  // Sipariş oluşturmada koşul onayı zorunludur; testler aksini belirtmedikçe onaylı gönderir.
+  if (method === 'POST' && path === '/orders' && body && typeof body === 'object' && !('acceptTerms' in body)) body = { ...body, acceptTerms: true };
   const r = await fetch(`${BASE}/api/v1${path}`, { method, headers, body: rawBody ?? (body === undefined ? undefined : JSON.stringify(body)) });
   const text = await r.text();
   let json: unknown = null;
@@ -87,7 +90,16 @@ async function main() {
   for (const p of products) for (const o of p.offers) offerIndex.set(o.id, { p, o });
   const s1Offers = (await api(t.supplier1, 'GET', '/supplier/offers')).body.offers as { id: string; stock: number; basePrice: number }[];
   const stockOf = async (offerId: string) => ((await api(t.supplier1, 'GET', '/supplier/offers')).body.offers as { id: string; stock: number }[]).find((o) => o.id === offerId)!.stock;
-  const balance = async (tok: string) => (await api(tok, 'GET', '/member/account')).body.creditBalance as number;
+  const returned = async (tok: string) => (await api(tok, 'GET', '/member/account')).body.returnedTotal as number;
+  /** Arka planda gönderilen karta iadelerin tamamlanmasını bekler (en fazla ~6 sn). */
+  const settledRefunds = async (tok: string, orderId: string) => {
+    for (let i = 0; i < 30; i++) {
+      const o = await getOrder(tok, orderId);
+      if (o.refunds.length && o.refunds.every((r) => r.status === 'succeeded')) return o;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return getOrder(tok, orderId);
+  };
   const outstanding = async (tok: string) => (await api(tok, 'GET', '/member/account')).body.outstanding as number;
   const getOrder = async (tok: string, id: string) => (await api<{ order: OrderDetailDTO }>(tok, 'GET', `/orders/${id}`)).body.order;
   const orgIdOf = async (tok: string) => (await api(tok, 'GET', '/auth/me')).body.user.org.id as string;
@@ -128,8 +140,9 @@ async function main() {
   const offA = s1Offers[0];
   const pA = offerIndex.get(offA.id)!.p;
   const stock0 = await stockOf(offA.id);
-  const r1 = await api<{ order: OrderDetailDTO }>(t.memberA, 'POST', '/orders', { items: [{ offerId: offA.id, qty: 2 }], paymentTerm: 'net30', useCredit: false });
+  const r1 = await api<{ order: OrderDetailDTO }>(t.memberA, 'POST', '/orders', { items: [{ offerId: offA.id, qty: 2 }], paymentTerm: 'net30' });
   check('vadeli sipariş oluşur', r1.status === 200, r1.body);
+  check('koşul onayı olmadan sipariş reddedilir (422)', (await api(t.memberA, 'POST', '/orders', { items: [{ offerId: offA.id, qty: 1 }], paymentTerm: 'net30', acceptTerms: false })).status === 422);
   const o1 = r1.body.order;
   const exp = computeOrderTotals(o1.items.map((i) => ({ qty: i.qty, unitPrice: i.unitPrice, marketPrice: i.marketPrice, vatRate: i.vatRate })), { plan: 'free', term: 'net30' });
   check('birim fiyat = kendi miktarının kademesi', o1.items[0].unitPrice === resolveTier(offerIndex.get(offA.id)!.o, 2).unitPrice);
@@ -153,7 +166,7 @@ async function main() {
 
   // ------------------------------------------------------------------
   section('Kartla ödeme (test sağlayıcısı)');
-  const cash = (await api<{ order: OrderDetailDTO }>(t.memberA, 'POST', '/orders', { items: [{ offerId: offA.id, qty: 3 }], paymentTerm: 'cash', useCredit: false })).body.order;
+  const cash = (await api<{ order: OrderDetailDTO }>(t.memberA, 'POST', '/orders', { items: [{ offerId: offA.id, qty: 3 }], paymentTerm: 'cash' })).body.order;
   check('peşin sipariş "ödeme bekleniyor" ve ödeme süresi var', cash.paymentStatus === 'unpaid' && !!cash.paymentDeadline, cash.paymentStatus);
   const supplierSees = async (orderId: string) => ((await api(t.supplier1, 'GET', '/supplier/items')).body.items as { orderId: string }[]).some((i) => i.orderId === orderId);
   check('ödenmemiş sipariş tedarikçiye görünmez', !(await supplierSees(cash.id)));
@@ -189,11 +202,14 @@ async function main() {
   check('  → sipariş "iptal edildi" ve toplam 0', o1b.status === 'cancelled' && o1b.total === 0);
   check('  → açık bakiye sipariş tutarı kadar azaldı', (await outstanding(t.memberA)) === outBefore - o1.total);
   check('  → stok geri eklendi', (await stockOf(offA.id)) === stockBeforeCancel + o1.items[0].qty);
-  const bal0 = await balance(t.memberA);
+  const ret0 = await returned(t.memberA);
   await api(t.supplier1, 'PATCH', `/supplier/items/${cash.items[0].id}`, { status: 'cancelled' });
   const ci = cash.items[0];
   const gross = ci.qty * ci.finalUnitPrice + Math.round((ci.qty * ci.finalUnitPrice * ci.vatRate) / 100);
-  check('iptal: kartla ödenmiş siparişte KDV dahil tutar krediye iade', (await balance(t.memberA)) === bal0 + gross, { bal0, now: await balance(t.memberA), gross });
+  const cashAfter = await settledRefunds(t.memberA, cash.id);
+  check('iptal: kartla ödenmiş siparişte KDV dahil tutar karta iade edildi', cashAfter.refundedTotal === gross && cashAfter.refunds.every((r) => r.status === 'succeeded' && r.reason === 'item_cancelled'), { refunds: cashAfter.refunds, gross });
+  check('  → üyenin hesap hareketlerine işlendi', (await returned(t.memberA)) === ret0 + gross);
+  check('  → aynı iptal ikinci kez iade üretmez', (await api(t.supplier1, 'PATCH', `/supplier/items/${cash.items[0].id}`, { status: 'cancelled' })).status === 400 && (await getOrder(t.memberA, cash.id)).refundedTotal === gross);
 
   // ------------------------------------------------------------------
   section('Eşzamanlılık: stok yarışı (2 üye, 24 eşzamanlı sipariş, stok 10)');
@@ -204,14 +220,20 @@ async function main() {
   check('kalanlar 400, 500 yok', race.every((r) => r.status === 200 || r.status === 400));
   check('stok 0 — asla eksiye düşmedi', (await stockOf(offR.id)) === 0);
 
-  section('Eşzamanlılık: kredi çifte harcama');
-  const balStart = await balance(t.memberA);
+  section('Pazaryeri: tedarikçi payı ve eski kredi alanı');
   await api(t.supplier1, 'PATCH', `/supplier/offers/${offR.id}`, { stock: 1_000 });
-  const creditRace = await Promise.all(Array.from({ length: 6 }, () => api<{ order: OrderDetailDTO }>(t.memberA, 'POST', '/orders', { items: [{ offerId: offR.id, qty: 4 }], paymentTerm: 'net30', useCredit: true })));
-  const applied = sum(creditRace.filter((r) => r.status === 200).map((r) => r.body.order.creditApplied));
-  const balEnd = await balance(t.memberA);
-  check('kullanılan toplam kredi ≤ başlangıç bakiyesi', applied <= balStart);
-  check('bakiye = başlangıç − kullanılan, negatif değil', balEnd === balStart - applied && balEnd >= 0, { balStart, applied, balEnd });
+  const legacy = await api<{ order: OrderDetailDTO }>(t.memberA, 'POST', '/orders', { items: [{ offerId: offR.id, qty: 1 }], paymentTerm: 'net30', useCredit: true });
+  check('eski "kredi kullan" alanı yok sayılır (kredi uygulanmaz)', legacy.status === 200 && legacy.body.order.creditApplied === 0);
+  if (pg) {
+    const pid = ok1.start.body.paymentId as string;
+    const rows = (await pg.query(`select pi.price, pi.sub_merchant_key, pi.sub_merchant_price, pi.provider_txn_id, o.sub_merchant_key as sup_key from payment_items pi join organizations o on o.id = pi.supplier_id where pi.payment_id = $1`, [pid])).rows;
+    const pay = (await pg.query(`select amount from payments where id = $1`, [pid])).rows[0];
+    check('ödeme sepeti kalem toplamı = ödeme tutarı', rows.length > 0 && sum(rows.map((r: { price: number }) => r.price)) === pay.amount, { rows, pay });
+    const exp = computeCharges(cash.items.map((i) => ({ id: i.id, qty: i.qty, finalUnitPrice: i.unitPrice, vatRate: i.vatRate, commissionBps: 300 })), 0);
+    check('her kalem tedarikçinin alt satıcı anahtarını ve payını taşır', rows.every((r: { sub_merchant_key: string; sup_key: string; sub_merchant_price: number; price: number }) => r.sub_merchant_key === r.sup_key && r.sub_merchant_price > 0 && r.sub_merchant_price < r.price));
+    check('tedarikçi payı = tutar − komisyon − komisyon KDV’si', rows[0].sub_merchant_price === exp.lines[0].supplierShare, { db: rows[0].sub_merchant_price, calc: exp.lines[0].supplierShare });
+    check('kalemlere işlem numarası (iade/onay için) yazıldı', rows.every((r: { provider_txn_id: string | null }) => !!r.provider_txn_id));
+  }
 
   // ------------------------------------------------------------------
   section('Dalga: havuz fiyatı, eşzamanlı kapanış, kademe iadesi');
@@ -247,8 +269,20 @@ async function main() {
   check(`${lines.length} dalga kaleminin nihai fiyatı bağımsız yeniden hesapla birebir`, mismatched.length === 0, mismatched.slice(0, 3));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const closedWave = ((await api(t.admin, 'GET', '/waves')).body.waves as any[]).find((w) => w.id === wave.id);
-  check('dalga toplam iadesi = yeniden hesaplanan iade', closedWave.totalCredit === recomputed.totalCredit, { db: closedWave.totalCredit, calc: recomputed.totalCredit });
-  check('sipariş bazlı iadelerin toplamı = dalga iadesi', sum(waveOrders.map((o) => o.waveCredit)) === closedWave.totalCredit);
+  // Fark üyeye KDV ve vade farkı dahil döner: vadeli siparişte borç nihai fiyatlara iner.
+  const planOf = new Map(((await api(t.admin, 'GET', '/admin/members')).body.members as { id: string; plan: 'free' | 'pro' }[]).map((m) => [m.id, m.plan]));
+  const bpsOf = (d: OrderDetailDTO) => FINANCING_BPS[planOf.get(d.member?.id ?? '') ?? 'free'][d.paymentTerm] ?? 0;
+  const expectedDrop = details
+    .filter((d) => d.status !== 'cancelled')
+    .map((d) => {
+      const before = computeCharges(d.items.map((i) => ({ id: i.id, qty: i.qty, finalUnitPrice: i.unitPrice, vatRate: i.vatRate, commissionBps: 0, cancelled: i.status === 'cancelled' })), bpsOf(d)).total;
+      const after = computeCharges(d.items.map((i) => ({ id: i.id, qty: i.qty, finalUnitPrice: i.finalUnitPrice, vatRate: i.vatRate, commissionBps: 0, cancelled: i.status === 'cancelled' })), bpsOf(d)).total;
+      return { d, drop: before - after, after };
+    });
+  check('vadeli dalga siparişlerinin borcu nihai fiyatlara indi (KDV + vade farkı dahil)', expectedDrop.every((x) => x.d.paymentStatus !== 'due' || x.d.total === x.after), expectedDrop.filter((x) => x.d.total !== x.after).slice(0, 2).map((x) => ({ total: x.d.total, after: x.after })));
+  check('sipariş bazlı farkların toplamı = dalga toplam farkı', sum(waveOrders.map((o) => o.waveCredit)) === closedWave.totalCredit, { orders: sum(waveOrders.map((o) => o.waveCredit)), wave: closedWave.totalCredit });
+  check('sipariş farkları bağımsız hesapla birebir', expectedDrop.every((x) => x.d.waveCredit === x.drop), expectedDrop.filter((x) => x.d.waveCredit !== x.drop).slice(0, 2).map((x) => ({ db: x.d.waveCredit, calc: x.drop })));
+  check('fark, net kademe iadesinden az değil (KDV eklenir)', closedWave.totalCredit >= recomputed.totalCredit, { db: closedWave.totalCredit, net: recomputed.totalCredit });
   check('hiçbir kalem ödediğinden pahalıya kapanmadı', lines.every((l) => l.final <= l.paidUnitPrice));
 
   // ------------------------------------------------------------------
@@ -264,17 +298,22 @@ async function main() {
   check('aynı ürüne ikinci bildirim reddedilir', (await api(t.memberA, 'POST', `/orders/${mo.id}/items/${it.id}/issue`, { type: 'missing', qty: 1 })).status === 400);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const issue = ((await api(t.admin, 'GET', '/admin/issues')).body.issues as any[]).find((i) => i.orderId === mo.id);
-  const balI = await balance(t.memberA);
+  const retI = await returned(t.memberA);
+  const moBefore = await getOrder(t.memberA, mo.id);
   const triple = await Promise.all([1, 2, 3].map(() => api(t.admin, 'PATCH', `/admin/issues/${issue.id}`, { status: 'resolved' })));
   const expectedCredit = Math.round(1 * it.finalUnitPrice * (1 + it.vatRate / 100));
   check('eşzamanlı 3 onaydan yalnızca 1’i geçer', triple.filter((r) => r.status === 200).length === 1, triple.map((r) => r.status));
-  check('kredi tam bir kez ve KDV dahil yazıldı', (await balance(t.memberA)) === balI + expectedCredit);
+  const moAfter = await getOrder(t.memberA, mo.id);
+  const moExp = computeCharges(moAfter.items.map((i) => ({ id: i.id, qty: i.qty, finalUnitPrice: i.finalUnitPrice, vatRate: i.vatRate, commissionBps: 0, issueCredit: i.issue?.status === 'resolved' ? i.issue.creditAmount : 0 })), FINANCING_BPS.free.net30!);
+  check('vadeli siparişte iade borçtan düşüldü (KDV dahil, vade farkı orantılı)', moAfter.total === moExp.total && moAfter.total < moBefore.total, { before: moBefore.total, after: moAfter.total, exp: moExp.total });
+  check('iade tam bir kez ve KDV dahil işlendi', moAfter.items[0].issue?.creditAmount === expectedCredit && (await returned(t.memberA)) === retI + (moBefore.total - moAfter.total));
 
   // ------------------------------------------------------------------
-  section('Tedarikçi hakedişi');
+  section('Tedarikçi hakedişi (pazaryeri mutabakatı)');
   const before = (await api(t.supplier1, 'GET', '/supplier/payouts')).body;
-  check('bekleyen bakiyede teslim edilmiş kalemler var', before.pending.itemCount > 0, before.pending);
-  check('bekleyen tutara onaylı mal kabul iadesi dahil', before.pending.issueDeductions >= expectedCredit, before.pending);
+  check('onaylanmış (serbest bırakılmış) kalemler var', before.pending.itemCount > 0, before.pending);
+  check('pazaryeri açık ve tedarikçi iyzico’ya kayıtlı', before.marketplace === true && before.profile.registered === true && before.profile.complete === true, before.profile);
+  check('bekleyen tutar: satış − iade − komisyon − komisyon KDV = net', before.pending.netAmount === before.pending.grossSales - before.pending.issueDeductions - before.pending.commission - before.pending.commissionVat, before.pending);
   check('tedarikçi IBAN’ı geçerli (mod-97)', !!before.iban && normalizeIban(before.iban) === before.iban);
   const periodEnd = new Date().toISOString();
   const [c1, c2] = await Promise.all([1, 2].map(() => api(t.admin, 'POST', '/admin/settlements', { periodEnd })));
@@ -282,22 +321,27 @@ async function main() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const created = [...c1.body.created, ...c2.body.created].filter((x: any) => x.supplier.name === 'Anadolu Gıda Toptan');
   check('her kalem yalnızca bir hakedişe girdi (çift sayım yok)', sum(created.map((x: { itemCount: number }) => x.itemCount)) === before.pending.itemCount, { created: created.map((x: { itemCount: number }) => x.itemCount), expected: before.pending.itemCount });
+  check('hakediş toplamı bekleyen tutarla aynı', sum(created.map((x: { netAmount: number }) => x.netAmount)) === before.pending.netAmount);
   const after = (await api(t.supplier1, 'GET', '/supplier/payouts')).body;
-  check('hakediş sonrası bekleyen bakiye sıfırlandı', after.pending.itemCount === 0 && after.pending.issueDeductions === 0, after.pending);
+  check('hakediş sonrası bekleyen bakiye sıfırlandı', after.pending.itemCount === 0 && after.pending.netAmount === 0, after.pending);
   const stId = created[0].id;
   const det = (await api(t.supplier1, 'GET', `/settlements/${stId}`)).body.settlement;
-  const recalc = computeSettlement(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    det.items.map((i: any) => ({ qty: i.qty, finalUnitPrice: i.finalUnitPrice, vatRate: i.vatRate, commissionBps: Math.round((i.commission / (i.qty * i.finalUnitPrice)) * 10_000) })),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    det.issues.map((i: any) => i.creditAmount),
-  );
-  check('hakediş net tutarı kalem dökümüyle tutarlı', det.netAmount === det.grossSales - det.commission - det.issueDeductions && Math.abs(recalc.netAmount - det.netAmount) <= det.items.length, { det: det.netAmount, recalc: recalc.netAmount });
+  check('pazaryerinde hakedişi iyzico öder (kanal iyzico, ödendi)', det.channel === 'iyzico' && det.status === 'paid', { channel: det.channel, status: det.status });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lineOk = det.items.every((i: any) => i.payout === i.gross - i.issueDeduction - i.commission - i.commissionVat);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lineSum = sum(det.items.map((i: any) => i.payout));
+  check('her satır: KDV dahil − iade − komisyon − komisyon KDV = net; satırlar toplamı = belge', lineOk && lineSum === det.netAmount, { lineOk, lineSum, net: det.netAmount });
   check('başka tedarikçi bu hakedişi göremez (404)', (await api(t.supplier2, 'GET', `/settlements/${stId}`)).status === 404);
-  check('referanssız ödendi işaretleme reddedilir', (await api(t.admin, 'POST', `/admin/settlements/${stId}/paid`, { reference: '' })).status === 422);
-  const pays = await Promise.all([1, 2].map(() => api(t.admin, 'POST', `/admin/settlements/${stId}/paid`, { reference: 'EFT123456' })));
-  check('hakediş tam bir kez ödendi işaretlenir', pays.filter((r) => r.status === 200).length === 1, pays.map((r) => r.status));
-  check('tedarikçiye "hakediş ödendi" bildirimi', (await api(t.supplier1, 'GET', '/notifications')).body.notifications.some((n: { type: string }) => n.type === 'settlement.paid'));
+  check('iyzico kanalındaki hakediş "ödendi" işaretlenemez', (await api(t.admin, 'POST', `/admin/settlements/${stId}/paid`, { reference: 'EFT123456' })).status === 400);
+  check('tedarikçiye "hakediş belgesi" bildirimi', (await api(t.supplier1, 'GET', '/notifications')).body.notifications.some((n: { type: string }) => n.type === 'settlement.created'));
+  const prof = await api(t.supplier1, 'GET', '/supplier/payout-profile');
+  check('tedarikçi ödeme bilgilerini görür; T.C. kimlik no maskeli', prof.status === 200 && !!prof.body.iban && (prof.body.identityNumberMasked === null || prof.body.identityNumberMasked.includes('*')), prof.body);
+  check('üye ödeme bilgisi uç noktasına erişemez (403)', (await api(t.memberA, 'GET', '/supplier/payout-profile')).status === 403);
+  const badVkn = await api(t.supplier1, 'PUT', '/supplier/payout-profile', { ...prof.body, subMerchantType: 'LIMITED_OR_JOINT_STOCK_COMPANY', taxNo: '1234567891', identityNumber: '' });
+  check('geçersiz vergi no reddedilir', badVkn.status === 400 || badVkn.status === 422, badVkn.body);
+  const okProf = await api(t.supplier1, 'PUT', '/supplier/payout-profile', { ...prof.body, identityNumber: '' });
+  check('geçerli ödeme bilgileri kaydedilir ve iyzico (test) kaydı korunur', okProf.status === 200 && okProf.body.status.registered === true, okProf.body);
 
   // ------------------------------------------------------------------
   section('Hesap yönetimi: hesap açma, geçici şifre, ekip, oturum iptali');
@@ -381,7 +425,8 @@ async function main() {
     ['order.create', 'order'],
     ['payment.succeeded', 'payment'],
     ['wave.close', 'wave'],
-    ['settlement.paid', 'settlement'],
+    ['settlement.create', 'settlement'],
+    ['refund.succeeded', 'refund'],
     ['org.create', 'organization'],
     ['auth.password_change', 'user'],
     ['user.deactivate', 'user'],
@@ -420,7 +465,47 @@ async function main() {
     check('  → stok geri döndü', (await stockOf(offA.id)) === stockStale + 5);
     check('bakım: gecikme bildirimi WhatsApp/e-posta kuyruğuna girdi', m.reminders >= 1 && m.outbox.sent >= 1, m);
     const again = await cron();
-    check('bakım tekrar çalışınca bir şey bozmaz (idempotent)', again.closedWaves.length === 0 && again.expiredOrders === 0 && again.overdueOrders === 0, again);
+    check('bakım tekrar çalışınca bir şey bozmaz (idempotent)', again.closedWaves.length === 0 && again.expiredOrders === 0 && again.overdueOrders === 0 && again.refunds.failed === 0, again);
+
+    // Teslim + 48 saat itiraz süresi → tedarikçi ödemesi serbest (pazaryeri ürün onayı)
+    const rel = (await api<{ order: OrderDetailDTO }>(t.memberA, 'POST', '/orders', { items: [{ offerId: offA.id, qty: 2 }], paymentTerm: 'cash' })).body.order;
+    await payWith(t.memberA, { purpose: 'order', orderId: rel.id });
+    const relItem = rel.items[0].id;
+    for (const st of ['confirmed', 'shipped', 'delivered']) await api(t.supplier1, 'PATCH', `/supplier/items/${relItem}`, { status: st });
+    await cron();
+    check('itiraz süresi dolmadan kalem serbest bırakılmaz', (await pg.query(`select released_at from order_items where id = $1`, [relItem])).rows[0].released_at === null);
+    const relDetail = await getOrder(t.memberA, rel.id);
+    check('teslimde sorun bildirimi son tarihi gösterilir', !!relDetail.items[0].issueDeadline);
+    await pg.query(`update order_items set delivered_at = now() - interval '49 hours' where id = $1`, [relItem]);
+    check('48 saatten sonra sorun bildirimi reddedilir', (await api(t.memberA, 'POST', `/orders/${rel.id}/items/${relItem}/issue`, { type: 'damaged', qty: 1 })).status === 400);
+    const m2 = await cron();
+    const relRow = (await pg.query(`select released_at, charge_amount, commission_amount, commission_vat, supplier_share from order_items where id = $1`, [relItem])).rows[0];
+    const relPi = (await pg.query(`select approved_at, price, sub_merchant_price from payment_items where order_item_id = $1`, [relItem])).rows[0];
+    check('bakım: itiraz süresi dolan kalem serbest bırakıldı, ürün onayı verildi', m2.releases?.released >= 1 && !!relRow.released_at && !!relPi.approved_at, { m: m2.releases, relRow, relPi });
+    check('  → tutarlar donduruldu: pay = tutar − komisyon − komisyon KDV’si', relRow.supplier_share === relRow.charge_amount - relRow.commission_amount - relRow.commission_vat && relRow.supplier_share === relPi.sub_merchant_price, { relRow, relPi });
+    check('  → tedarikçi ekranında "ödemesi onaylandı"', ((await api(t.supplier1, 'GET', '/supplier/items')).body.items as { id: string; payoutStatus: string }[]).find((i) => i.id === relItem)?.payoutStatus === 'released');
+
+    // Sonucu belirsiz kalan iade asla otomatik tekrar gönderilmez; yönetim kontrol eder
+    const relPiId = (await pg.query(`select id, payment_id from payment_items where order_item_id = $1`, [relItem])).rows[0];
+    const stuck = (await pg.query(
+      `insert into refunds (id, payment_item_id, payment_id, org_id, order_id, order_item_id, amount, reason, description, status, attempts, processed_at)
+       values (gen_random_uuid()::text, $1, $2, $3, $4, $5, 1, 'issue', 'test: belirsiz iade', 'processing', 1, now() - interval '11 minutes') returning id`,
+      [relPiId.id, relPiId.payment_id, aOrg, rel.id, relItem],
+    )).rows[0].id;
+    await cron();
+    check('bakım: 10 dakikadır "işleniyor" kalan iade "elle kontrol" durumuna düştü', (await pg.query(`select status from refunds where id = $1`, [stuck])).rows[0].status === 'needs_review');
+    const adminRefunds = (await api(t.admin, 'GET', '/admin/refunds')).body.refunds as { id: string; status: string }[];
+    check('yönetim kontrol bekleyen iadeyi görür', adminRefunds.some((r) => r.id === stuck && r.status === 'needs_review'));
+    check('üye yönetimin iade uç noktasına erişemez (403)', (await api(t.memberA, 'POST', `/admin/refunds/${stuck}`, { action: 'retry' })).status === 403);
+    check('notsuz "elle yapıldı" işaretlemesi reddedilir', (await api(t.admin, 'POST', `/admin/refunds/${stuck}`, { action: 'mark_done', note: '' })).status === 422);
+    check('yönetim iadeyi yeniden dener', (await api(t.admin, 'POST', `/admin/refunds/${stuck}`, { action: 'retry' })).status === 200);
+    let stuckStatus = '';
+    for (let i = 0; i < 30 && stuckStatus !== 'succeeded'; i++) {
+      stuckStatus = (await pg.query(`select status from refunds where id = $1`, [stuck])).rows[0].status;
+      if (stuckStatus !== 'succeeded') await new Promise((r) => setTimeout(r, 200));
+    }
+    check('  → iade sağlayıcıya gönderildi ve tamamlandı', stuckStatus === 'succeeded', stuckStatus);
+    check('  → tamamlanan iade yeniden denenemez', (await api(t.admin, 'POST', `/admin/refunds/${stuck}`, { action: 'retry' })).status === 400);
 
     const resetEmail = ACC.memberB;
     check('şifre sıfırlama: kayıtlı olmayan adres için de aynı yanıt', (await api(null, 'POST', '/auth/forgot-password', { email: `yok-${uniq}@ornek.demo` })).status === 200);
@@ -445,7 +530,7 @@ async function main() {
   section('Genel değişmezler');
   const members = (await api(t.admin, 'GET', '/admin/members')).body.members as { outstanding: number }[];
   check('hiçbir üyenin açık bakiyesi negatif değil', members.every((m) => m.outstanding >= 0));
-  check('kredi bakiyesi negatif değil', (await balance(t.memberA)) >= 0);
+  check('üyeye dönen toplam negatif değil', (await returned(t.memberA)) >= 0);
   const supplierItems = (await api(t.supplier1, 'GET', '/supplier/items')).body.items as { id: string }[];
   check('tedarikçi yalnızca kendi kalemlerini görür', supplierItems.length > 0 && ((await api(t.supplier2, 'GET', '/supplier/items')).body.items as { id: string }[]).every((i) => !supplierItems.some((x) => x.id === i.id)));
   if (pg) {
@@ -455,6 +540,18 @@ async function main() {
     check('veritabanında çift mal kabul bildirimi yok', dup.rows[0].n === 0);
     const orphan = await pg.query(`select count(*)::int n from order_items i join settlements s on s.id = i.settlement_id where i.supplier_id <> s.supplier_id`);
     check('hiçbir kalem başka tedarikçinin hakedişinde değil', orphan.rows[0].n === 0);
+    const overRefund = await pg.query(`select count(*)::int n from payment_items pi where (select coalesce(sum(amount), 0) from refunds r where r.payment_item_id = pi.id) > pi.price`);
+    check('hiçbir kaleme ödenenden fazla iade yapılmadı', overRefund.rows[0].n === 0);
+    const basketSum = await pg.query(`select count(*)::int n from payments p where p.status = 'succeeded' and exists (select 1 from payment_items pi where pi.payment_id = p.id) and p.amount <> (select sum(price) from payment_items pi where pi.payment_id = p.id)`);
+    check('her başarılı ödemede kalem toplamı = ödeme tutarı', basketSum.rows[0].n === 0);
+    const share = await pg.query(`select count(*)::int n from payment_items where sub_merchant_price is not null and (sub_merchant_price < 0 or sub_merchant_price > price)`);
+    check('tedarikçi payı hiçbir kalemde tutarı aşmıyor', share.rows[0].n === 0);
+    const paidMismatch = await pg.query(`
+      select count(*)::int n from orders o
+      where o.payment_status = 'paid' and exists (select 1 from payment_items pi join payments p on p.id = pi.payment_id where p.order_id = o.id and p.status = 'succeeded')
+        and (select sum(pi.price) - coalesce((select sum(r.amount) from refunds r join payment_items x on x.id = r.payment_item_id join payments px on px.id = x.payment_id where px.order_id = o.id and px.status = 'succeeded'), 0)
+             from payment_items pi join payments p on p.id = pi.payment_id where p.order_id = o.id and p.status = 'succeeded') < 0`);
+    check('hiçbir siparişte net tahsilat eksiye düşmedi', paidMismatch.rows[0].n === 0);
     await pg.end();
   }
 

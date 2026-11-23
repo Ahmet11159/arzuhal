@@ -1,6 +1,6 @@
 import 'server-only';
 import { toLira } from '@havuz/core';
-import { PaymentConfigError, type CheckoutParams, type PaymentProvider } from './provider';
+import { PaymentConfigError, PaymentProviderRejected, type CheckoutParams, type PaymentProvider, type SubMerchantInput } from './provider';
 import { iyzicoAuthHeaders, iyzicoGsm, iyzicoName } from './iyzico-auth';
 
 export { iyzicoAuthHeaders };
@@ -12,11 +12,21 @@ export { iyzicoAuthHeaders };
  *   IYZICO_BASE_URL                     — sandbox: https://sandbox-api.iyzipay.com
  *                                         canlı:   https://api.iyzipay.com
  *
+ *   IYZICO_MARKETPLACE=true             — hesabınız iyzico Pazaryeri ise: sepet kalemlerine tedarikçi
+ *                                         anahtarı ve payı eklenir, teslimden sonra ürün onayı verilir
+ *   IYZICO_PLATFORM_SUBMERCHANT_KEY     — (isteğe bağlı) pazaryerinde Havuz'un kendi satışları (Pro üyelik)
+ *                                         için alt satıcı anahtarı; iyzico her kalemde anahtar isterse
+ *
  * Akış: initialize → kullanıcı iyzico ödeme sayfasında öder → iyzico callbackUrl'e
  * `token` POST eder → sunucu checkoutform/auth/ecom/detail ile sonucu doğrular.
+ * Uç noktalar iyzico'nun resmî kütüphaneleriyle (iyzipay-node / iyzipay-java) aynıdır.
  */
 const INIT_PATH = '/payment/iyzipos/checkoutform/initialize/auth/ecom';
 const DETAIL_PATH = '/payment/iyzipos/checkoutform/auth/ecom/detail';
+const REFUND_PATH = '/payment/refund';
+const APPROVE_PATH = '/payment/iyzipos/item/approve';
+const SUBMERCHANT_PATH = '/onboarding/submerchant';
+const SUBMERCHANT_DETAIL_PATH = '/onboarding/submerchant/detail';
 
 function config() {
   const apiKey = process.env.IYZICO_API_KEY?.trim();
@@ -28,26 +38,35 @@ function config() {
 
 /** iyzico tutarları nokta ayraçlı string ister: 1234.5 → "1234.5" */
 const money = (kurus: number) => String(toLira(kurus));
+const toKurus = (v: unknown) => (typeof v === 'number' ? Math.round(v * 100) : typeof v === 'string' && v !== '' ? Math.round(Number(v) * 100) : undefined);
 
-async function call<T>(path: string, payload: unknown): Promise<T> {
+interface BaseResponse {
+  status: 'success' | 'failure';
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+async function call<T extends BaseResponse>(path: string, payload: unknown, method: 'POST' | 'PUT' = 'POST'): Promise<T> {
   const { apiKey, secretKey, baseUrl } = config();
   const body = JSON.stringify(payload);
-  const res = await fetch(baseUrl + path, { method: 'POST', headers: iyzicoAuthHeaders(apiKey, secretKey, path, body), body });
+  const res = await fetch(baseUrl + path, { method, headers: iyzicoAuthHeaders(apiKey, secretKey, path, body), body, signal: AbortSignal.timeout(20_000) });
   const json = (await res.json().catch(() => null)) as T | null;
-  if (!res.ok || !json) throw new Error(`iyzico HTTP ${res.status}`);
+  if (!json) throw new Error(`iyzico HTTP ${res.status}`);
   return json;
 }
 
-interface InitResponse {
-  status: 'success' | 'failure';
-  errorMessage?: string;
+/** Başarısız iyzico yanıtını anlamlı hataya çevirir (iş kuralı reddi yeniden denenmez). */
+function fail(r: BaseResponse, fallback: string): never {
+  const msg = `${r.errorMessage ?? fallback}${r.errorCode ? ` (${r.errorCode})` : ''}`;
+  throw new PaymentProviderRejected(msg);
+}
+
+interface InitResponse extends BaseResponse {
   token?: string;
   paymentPageUrl?: string;
 }
 
-interface DetailResponse {
-  status: 'success' | 'failure';
-  errorMessage?: string;
+interface DetailResponse extends BaseResponse {
   paymentStatus?: 'SUCCESS' | 'FAILURE' | 'INIT_THREEDS' | 'CALLBACK_THREEDS';
   paymentId?: string;
   paidPrice?: number;
@@ -55,7 +74,10 @@ interface DetailResponse {
   basketId?: string;
   lastFourDigits?: string;
   mdStatus?: number;
+  itemTransactions?: { itemId?: string; paymentTransactionId?: string; price?: number; paidPrice?: number }[];
 }
+
+const marketplace = () => process.env.IYZICO_MARKETPLACE === 'true';
 
 export const iyzicoProvider: PaymentProvider = {
   name: 'iyzico',
@@ -63,6 +85,7 @@ export const iyzicoProvider: PaymentProvider = {
     const person = iyzicoName(p.buyer.name);
     const price = money(p.amount);
     const address = { contactName: p.buyer.name, city: p.buyer.city, country: 'Turkey', address: p.buyer.address };
+    const platformKey = process.env.IYZICO_PLATFORM_SUBMERCHANT_KEY?.trim();
     const r = await call<InitResponse>(INIT_PATH, {
       locale: 'tr',
       conversationId: p.paymentId,
@@ -88,17 +111,21 @@ export const iyzicoProvider: PaymentProvider = {
       },
       shippingAddress: address,
       billingAddress: address,
-      basketItems: [
-        {
-          id: p.paymentId,
-          name: p.description.slice(0, 100),
-          category1: p.purpose === 'subscription' ? 'Üyelik' : 'Tedarik',
+      basketItems: p.items.map((it) => {
+        const base = {
+          id: it.id,
+          name: it.name.slice(0, 100),
+          category1: it.category.slice(0, 100),
           itemType: p.purpose === 'subscription' ? 'VIRTUAL' : 'PHYSICAL',
-          price,
-        },
-      ],
+          price: money(it.price),
+        };
+        if (!marketplace()) return base;
+        if (it.subMerchantKey) return { ...base, subMerchantKey: it.subMerchantKey, subMerchantPrice: money(it.subMerchantPrice ?? 0) };
+        // Havuz'un kendi satışı (ör. Pro üyelik): yapılandırıldıysa platformun alt satıcı anahtarıyla
+        return platformKey ? { ...base, subMerchantKey: platformKey, subMerchantPrice: money(it.price) } : base;
+      }),
     });
-    if (r.status !== 'success' || !r.token || !r.paymentPageUrl) throw new Error(r.errorMessage ?? 'iyzico ödeme başlatılamadı');
+    if (r.status !== 'success' || !r.token || !r.paymentPageUrl) fail(r, 'iyzico ödeme başlatılamadı');
     return { redirectUrl: r.paymentPageUrl, token: r.token };
   },
 
@@ -109,10 +136,71 @@ export const iyzicoProvider: PaymentProvider = {
     return {
       status: ok ? 'succeeded' : 'failed',
       providerPaymentId: r.paymentId,
-      paidAmount: typeof r.paidPrice === 'number' ? Math.round(r.paidPrice * 100) : undefined,
+      paidAmount: toKurus(r.paidPrice),
       cardLast4: r.lastFourDigits,
       conversationId: r.conversationId ?? r.basketId,
       error: ok ? undefined : r.errorMessage ?? 'Ödeme başarısız',
+      items: (r.itemTransactions ?? [])
+        .filter((t) => t.itemId && t.paymentTransactionId)
+        .map((t) => ({ itemId: t.itemId!, transactionId: String(t.paymentTransactionId), price: toKurus(t.price) })),
     };
+  },
+
+  async refund(req) {
+    const r = await call<BaseResponse & { paymentTransactionId?: string; price?: number }>(REFUND_PATH, {
+      locale: 'tr',
+      conversationId: req.refundId,
+      paymentTransactionId: req.transactionId,
+      price: money(req.amount),
+      currency: 'TRY',
+      ip: req.ip,
+    });
+    if (r.status !== 'success') fail(r, 'İade yapılamadı');
+    return { providerRefundId: r.paymentTransactionId ? `${r.paymentTransactionId}:${req.refundId.slice(0, 8)}` : undefined };
+  },
+
+  async approveItem(transactionId) {
+    const r = await call<BaseResponse>(APPROVE_PATH, { locale: 'tr', conversationId: transactionId, paymentTransactionId: transactionId });
+    if (r.status !== 'success') fail(r, 'Ürün onayı verilemedi');
+  },
+
+  async upsertSubMerchant(input: SubMerchantInput, existingKey) {
+    const person = iyzicoName(input.contactName ?? input.name);
+    const common = {
+      locale: 'tr',
+      conversationId: input.externalId,
+      name: input.name.slice(0, 100),
+      email: input.email,
+      gsmNumber: iyzicoGsm(input.phone),
+      address: input.address,
+      iban: input.iban,
+      currency: 'TRY',
+    };
+    const typed =
+      input.type === 'PERSONAL'
+        ? { contactName: person.name, contactSurname: person.surname, identityNumber: input.identityNumber }
+        : input.type === 'PRIVATE_COMPANY'
+          ? { taxOffice: input.taxOffice, legalCompanyTitle: input.legalTitle, identityNumber: input.identityNumber }
+          : { taxOffice: input.taxOffice, taxNumber: input.taxNumber, legalCompanyTitle: input.legalTitle };
+    if (existingKey) {
+      const r = await call<BaseResponse>(SUBMERCHANT_PATH, { ...common, ...typed, subMerchantKey: existingKey }, 'PUT');
+      if (r.status !== 'success') fail(r, 'Tedarikçi bilgileri iyzico’da güncellenemedi');
+      return { subMerchantKey: existingKey };
+    }
+    const r = await call<BaseResponse & { subMerchantKey?: string }>(SUBMERCHANT_PATH, {
+      ...common,
+      ...typed,
+      subMerchantExternalId: input.externalId,
+      subMerchantType: input.type,
+    });
+    if (r.status === 'success' && r.subMerchantKey) return { subMerchantKey: r.subMerchantKey };
+    // Daha önce kaydedilmiş olabilir (ör. yarıda kalan bir kayıt): dış kimlikle anahtarı sorgula.
+    const d = await call<BaseResponse & { subMerchantKey?: string }>(SUBMERCHANT_DETAIL_PATH, {
+      locale: 'tr',
+      conversationId: input.externalId,
+      subMerchantExternalId: input.externalId,
+    });
+    if (d.status === 'success' && d.subMerchantKey) return { subMerchantKey: d.subMerchantKey };
+    fail(r, 'Tedarikçi iyzico’ya kaydedilemedi');
   },
 };

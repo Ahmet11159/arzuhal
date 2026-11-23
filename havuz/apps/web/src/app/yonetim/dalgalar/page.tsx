@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Gift, Lock, Plus, Waves } from 'lucide-react';
-import { formatTRY, formatTRYCompact, WAVE_STATUS_LABEL } from '@havuz/core';
+import { formatTRY, formatTRYCompact, fromTrInputValue, nextTrWeekday, trInputValue, WAVE_STATUS_LABEL } from '@havuz/core';
 import { useCloseWave, useCreateWave, useWave, useWaves } from '@havuz/sdk';
 import { PageHeader } from '@/components/app/page-header';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -18,10 +18,6 @@ import { PageSkeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/empty';
 import { fmtDate, fmtDateTime } from '@/lib/format';
 
-function toLocalInput(d: Date) {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
 
 export default function AdminWaves() {
   const { data, isLoading, error, refetch } = useWaves();
@@ -195,14 +191,13 @@ export default function AdminWaves() {
 
 function CreateWaveSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const create = useCreateWave();
-  const now = new Date();
-  const cutoffDefault = new Date(now.getTime() + 6 * 86_400_000);
-  cutoffDefault.setHours(18, 0, 0, 0);
+  // Saatler Türkiye saatiyle girilir/gösterilir (yöneticinin bilgisayarı başka saat diliminde olsa da).
+  const cutoffDefault = nextTrWeekday(4, 18);
   const deliveryDefault = new Date(cutoffDefault.getTime() + 40 * 3600_000);
   const [title, setTitle] = useState('Haftalık Dalga');
   const [region, setRegion] = useState('İstanbul');
-  const [cutoff, setCutoff] = useState(toLocalInput(cutoffDefault));
-  const [delivery, setDelivery] = useState(toLocalInput(deliveryDefault));
+  const [cutoff, setCutoff] = useState(trInputValue(cutoffDefault));
+  const [delivery, setDelivery] = useState(trInputValue(deliveryDefault));
   const [err, setErr] = useState<string | null>(null);
 
   return (
@@ -217,7 +212,10 @@ function CreateWaveSheet({ open, onClose }: { open: boolean; onClose: () => void
           loading={create.isPending}
           onClick={async () => {
             try {
-              const r = await create.mutateAsync({ title, region, cutoffAt: new Date(cutoff).toISOString(), deliveryAt: new Date(delivery).toISOString() });
+              const c = fromTrInputValue(cutoff);
+              const d = fromTrInputValue(delivery);
+              if (!c || !d) return setErr('Tarih ve saatleri eksiksiz girin');
+              const r = await create.mutateAsync({ title, region, cutoffAt: c.toISOString(), deliveryAt: d.toISOString() });
               toast.success(`${r.wave.title} açıldı`);
               onClose();
             } catch (e) {

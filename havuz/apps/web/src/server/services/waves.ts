@@ -1,6 +1,6 @@
 import 'server-only';
 import { and, desc, eq, gt, inArray, ne } from 'drizzle-orm';
-import { formatTRY } from '@havuz/core';
+import { formatTRY, trFormat } from '@havuz/core';
 import {
   bestPossiblePrice,
   closeWave as closeWaveDomain,
@@ -15,6 +15,7 @@ import { badRequest, notFound } from '../http';
 import { audit, SYSTEM, type Actor } from '../audit';
 import { notify } from '../notify';
 import { cancelUnpaidOrder } from './orders';
+import { applyOrderChange, kickRefunds } from './money-flow';
 import { pooledForWave, toWaveDTO, waveOfferState, waveStats } from './common';
 
 export async function listWaves(db: DB): Promise<WaveDTO[]> {
@@ -87,7 +88,7 @@ export async function createWave(db: DB, raw: unknown, actor: Actor = SYSTEM): P
         orgId: m.id,
         type: 'wave.opened',
         title: `${w.title} açıldı`,
-        body: `Sipariş alımı ${new Intl.DateTimeFormat('tr-TR', { weekday: 'long', hour: '2-digit', minute: '2-digit' }).format(w.cutoffAt)}’e kadar açık. Havuz büyüdükçe fiyatlar düşer.`,
+        body: `Sipariş alımı ${trFormat({ weekday: 'long', hour: '2-digit', minute: '2-digit' }).format(w.cutoffAt)}’e kadar açık. Havuz büyüdükçe fiyatlar düşer.`,
         link: '/uye/dalga',
         dedupeKey: `wave.opened:${w.id}:${m.id}`,
       });
@@ -98,10 +99,16 @@ export async function createWave(db: DB, raw: unknown, actor: Actor = SYSTEM): P
 }
 
 /**
- * Dalgayı kapatır: nihai kademeleri hesaplar, kalemlerin nihai fiyatlarını
- * günceller, farkı üyelere kredi olarak yazar. Tek transaction içinde, idempotent.
+ * Dalgayı kapatır: nihai kademeleri hesaplar, kalemlerin nihai fiyatlarını günceller ve farkı üyeye
+ * geri verir (ödenmiş siparişte karta iade, vadeli siparişte borçtan düşüm). Tek transaction, idempotent.
  */
 export async function closeWave(db: DB, id: string, actor: Actor = SYSTEM) {
+  const r = await closeWaveTx(db, id, actor);
+  kickRefunds(db);
+  return r;
+}
+
+async function closeWaveTx(db: DB, id: string, actor: Actor) {
   return db.transaction(async (tx) => {
     // Satır kilidi: eşzamanlı ikinci kapanış ve kapanış sırasında yazılan siparişler sıraya girer.
     const [w] = await tx.select().from(s.waves).where(eq(s.waves.id, id)).for('update');
@@ -140,36 +147,42 @@ export async function closeWave(db: DB, id: string, actor: Actor = SYSTEM) {
         await tx.update(s.orderItems).set({ finalUnitPrice: l.finalUnitPrice }).where(eq(s.orderItems.id, l.lineId));
       }
     }
-    const numbers = Object.fromEntries(rows.map((r) => [r.orderId, r.orderNumber]));
-    for (const [orderId, credit] of Object.entries(result.creditsByOrder)) {
+    // Fark her sipariş için kalem dökümünden hesaplanır (KDV ve vade farkı payı dahil).
+    const byMember = new Map<string, { refund: number; reduced: number }>();
+    let totalCredit = 0;
+    for (const orderId of Object.keys(result.creditsByOrder)) {
       const memberId = rows.find((r) => r.orderId === orderId)!.memberId;
-      await tx.update(s.orders).set({ waveCredit: credit }).where(eq(s.orders.id, orderId));
-      await tx.insert(s.ledgerEntries).values({
-        orgId: memberId,
-        type: 'wave_rebate',
-        amount: credit,
-        description: `${w.title} kademe farkı (${numbers[orderId]})`,
-        refId: orderId,
-      });
+      const m = await applyOrderChange(tx, orderId, 'wave_rebate', `${w.title} kademe farkı`);
+      await tx.update(s.orders).set({ waveCredit: m.amount }).where(eq(s.orders.id, orderId));
+      if (m.amount <= 0) continue;
+      totalCredit += m.amount;
+      const agg = byMember.get(memberId) ?? { refund: 0, reduced: 0 };
+      if (m.mode === 'refund') agg.refund += m.amount;
+      else agg.reduced += m.amount;
+      byMember.set(memberId, agg);
     }
     await tx
       .update(s.waves)
-      .set({ status: 'closed', closedAt: new Date(), totalCredit: result.totalCredit })
+      .set({ status: 'closed', closedAt: new Date(), totalCredit })
       .where(eq(s.waves.id, id));
 
-    for (const [memberId, credit] of Object.entries(result.creditsByMember)) {
+    for (const [memberId, agg] of byMember) {
+      const parts = [
+        agg.refund > 0 ? `${formatTRY(agg.refund)} kartınıza iade ediliyor` : null,
+        agg.reduced > 0 ? `${formatTRY(agg.reduced)} vadeli borcunuzdan düşüldü` : null,
+      ].filter(Boolean);
       await notify(tx, {
         orgId: memberId,
         type: 'wave.rebate',
-        title: `${w.title} kapandı: ${formatTRY(credit)} iade`,
-        body: `Havuz büyüdüğü için nihai fiyat düştü; fark kredi bakiyenize eklendi. Bir sonraki siparişte kullanabilirsiniz.`,
+        title: `${w.title} kapandı: ${formatTRY(agg.refund + agg.reduced)} fark size döndü`,
+        body: `Havuz büyüdüğü için nihai fiyat düştü: ${parts.join(', ')}.`,
         link: '/uye/hesap',
         dedupeKey: `wave.rebate:${id}:${memberId}`,
         email: true,
       });
     }
-    await audit(tx, actor, 'wave.close', 'wave', id, `${w.title} kapatıldı; ${formatTRY(result.totalCredit)} kademe iadesi`, { cancelledUnpaid: unpaid.length });
+    await audit(tx, actor, 'wave.close', 'wave', id, `${w.title} kapatıldı; ${formatTRY(totalCredit)} kademe farkı üyelere döndü`, { cancelledUnpaid: unpaid.length });
 
-    return { totalCredit: result.totalCredit, members: Object.keys(result.creditsByMember).length, offers: result.offers.length };
+    return { totalCredit, members: byMember.size, offers: result.offers.length };
   });
 }

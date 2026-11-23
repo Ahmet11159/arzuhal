@@ -1,18 +1,19 @@
 import 'server-only';
-import { and, desc, eq, gt, inArray, notInArray } from 'drizzle-orm';
-import { type AccountDTO, type MemberDashboardDTO } from '@havuz/core';
+import { and, desc, eq, gt, inArray, notInArray, sum } from 'drizzle-orm';
+import { trMonthStart, type AccountDTO, type MemberDashboardDTO } from '@havuz/core';
 import type { DB } from '../db/client';
+import { listRefunds } from './refunds';
 import * as s from '../db/schema';
 import { notFound } from '../http';
 import type { SessionPayload } from '../auth/secret';
-import { activeWaveDTO, creditBalance, DAY, itemFacts, lastMonths, median, monthKey, outstanding } from './common';
+import { activeWaveDTO, DAY, itemFacts, lastMonths, median, monthKey, outstanding } from './common';
 import { toOrderSummary } from './orders';
 
 export async function memberDashboard(db: DB, session: SessionPayload): Promise<MemberDashboardDTO> {
   const org = await db.query.organizations.findFirst({ where: eq(s.organizations.id, session.org) });
   if (!org) throw notFound('İşletme');
   const now = new Date();
-  const since = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+  const since = trMonthStart(now, -5);
   const facts = await itemFacts(db, { since, memberId: org.id });
 
   const months = lastMonths(6, now);
@@ -78,7 +79,6 @@ export async function memberDashboard(db: DB, session: SessionPayload): Promise<
     .from(s.orders)
     .where(and(eq(s.orders.memberId, org.id), notInArray(s.orders.status, ['delivered', 'cancelled'])));
 
-  const credit = await creditBalance(db, org.id);
   const recentSavings = cur.savings;
   return {
     org: { id: org.id, name: org.name, plan: org.plan, creditLimit: org.creditLimit },
@@ -87,7 +87,7 @@ export async function memberDashboard(db: DB, session: SessionPayload): Promise<
       monthSavings: recentSavings,
       savingRate: cur.spend + recentSavings > 0 ? recentSavings / (cur.spend + recentSavings) : 0,
       lifetimeSavings,
-      creditBalance: credit,
+      returnedTotal: await returnedTotal(db, org.id),
       outstanding: await outstanding(db, org.id),
       activeOrders: activeOrders.length,
     },
@@ -97,6 +97,15 @@ export async function memberDashboard(db: DB, session: SessionPayload): Promise<
     openWave: await activeWaveDTO(db),
     recentOrders: recent.map((o) => toOrderSummary(o)),
   };
+}
+
+/** Dalga farkı, iptal ve mal kabul iadeleriyle üyeye dönen toplam (eski kredi kullanımları hariç). */
+async function returnedTotal(db: DB, orgId: string) {
+  const [r] = await db
+    .select({ v: sum(s.ledgerEntries.amount).mapWith(Number) })
+    .from(s.ledgerEntries)
+    .where(and(eq(s.ledgerEntries.orgId, orgId), gt(s.ledgerEntries.amount, 0)));
+  return r?.v ?? 0;
 }
 
 export async function memberAccount(db: DB, session: SessionPayload): Promise<AccountDTO> {
@@ -136,9 +145,10 @@ export async function memberAccount(db: DB, session: SessionPayload): Promise<Ac
       taxNo: org.taxNo,
       creditLimit: org.creditLimit,
     },
-    creditBalance: await creditBalance(db, org.id),
+    returnedTotal: await returnedTotal(db, org.id),
     outstanding: await outstanding(db, org.id),
     ledger: ledger.map((e) => ({ id: e.id, type: e.type, amount: e.amount, description: e.description, createdAt: e.createdAt.toISOString() })),
+    refunds: await listRefunds(db, { orgId: org.id, limit: 50 }),
     dueOrders: due.map((o) => toOrderSummary(o)),
     invoices,
   };

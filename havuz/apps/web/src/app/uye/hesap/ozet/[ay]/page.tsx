@@ -95,6 +95,7 @@ export default function StatementPage({ params }: { params: { ay: string } }) {
                           <span className="font-mono font-semibold">{o.number}</span> · {fmtDate(o.date)} · {PAYMENT_TERM_LABEL[o.paymentTerm]} · toplam <b>{formatTRY(o.total)}</b>
                           {o.creditApplied > 0 && ` (kredi −${formatTRY(o.creditApplied)})`}
                           {o.financingFee > 0 && ` (vade farkı ${formatTRY(o.financingFee)})`}
+                          {o.refunded > 0 && ` (karta iade −${formatTRY(o.refunded)})`}
                         </td>
                       </tr>
                       {o.lines.map((l, i) => (
@@ -138,6 +139,12 @@ export default function StatementPage({ params }: { params: { ay: string } }) {
                     <span>Ödenecek / ödenen toplam</span>
                     <span className="tabular">{formatTRY(st.totals.total)}</span>
                   </div>
+                  {st.totals.refunded > 0 && (
+                    <>
+                      <Row l="Karta iade edilen" v={`−${formatTRY(st.totals.refunded)}`} />
+                      <Row l="Net ödenen" v={formatTRY(st.totals.total - st.totals.refunded)} />
+                    </>
+                  )}
                   {st.totals.waveCredits > 0 && (
                     <div className="flex justify-between pt-1 text-success">
                       <span>Bu ay kazanılan dalga iadesi</span>

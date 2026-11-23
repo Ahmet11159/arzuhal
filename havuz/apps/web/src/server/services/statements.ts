@@ -1,12 +1,12 @@
 import 'server-only';
 import { and, eq, gte, lt, ne } from 'drizzle-orm';
-import type { StatementDTO } from '@havuz/core';
+import { trDate, trFormat, type StatementDTO } from '@havuz/core';
 import type { DB } from '../db/client';
 import * as s from '../db/schema';
 import { badRequest, notFound } from '../http';
 import type { SessionPayload } from '../auth/secret';
 
-const monthLabel = new Intl.DateTimeFormat('tr-TR', { month: 'long', year: 'numeric' });
+const monthLabel = trFormat({ month: 'long', year: 'numeric' });
 
 /**
  * Aylık konsolide hesap özeti: tüm tedarikçilerden alımlar tek belgede, KDV oranına göre dağılım.
@@ -15,13 +15,14 @@ const monthLabel = new Intl.DateTimeFormat('tr-TR', { month: 'long', year: 'nume
 export async function memberStatement(db: DB, session: SessionPayload, month: string): Promise<StatementDTO> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw badRequest('Ay YYYY-AA biçiminde olmalı');
   const [y, m] = month.split('-').map(Number);
-  const from = new Date(y, m - 1, 1);
-  const to = new Date(y, m, 1);
+  // Ay sınırları Türkiye saatine göre (sunucu UTC olsa da).
+  const from = trDate(y, m, 1);
+  const to = trDate(y, m + 1, 1);
   const org = await db.query.organizations.findFirst({ where: eq(s.organizations.id, session.org) });
   if (!org) throw notFound('İşletme');
   const orders = await db.query.orders.findMany({
     where: and(eq(s.orders.memberId, org.id), gte(s.orders.createdAt, from), lt(s.orders.createdAt, to), ne(s.orders.status, 'cancelled')),
-    with: { items: { with: { product: true, supplier: true } } },
+    with: { items: { with: { product: true, supplier: true } }, refunds: { columns: { amount: true, status: true } } },
     orderBy: (o, { asc }) => [asc(o.createdAt)],
   });
   const vatMap = new Map<number, { base: number; vat: number }>();
@@ -49,6 +50,7 @@ export async function memberStatement(db: DB, session: SessionPayload, month: st
         financingFee: o.financingFee,
         creditApplied: o.creditApplied,
         total: o.total,
+        refunded: o.refunds.reduce((a, r) => a + r.amount, 0),
       };
     });
   const credits = await db
@@ -68,6 +70,7 @@ export async function memberStatement(db: DB, session: SessionPayload, month: st
       financingFee: sum((o) => o.financingFee),
       creditApplied: sum((o) => o.creditApplied),
       total: sum((o) => o.total),
+      refunded: sum((o) => o.refunded),
       waveCredits: credits.reduce((a, c) => a + c.amount, 0),
     },
   };

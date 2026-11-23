@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { Check, ClipboardList, Truck, Waves, X, Zap } from 'lucide-react';
-import { formatTRY, ITEM_STATUS_LABEL, ITEM_TRANSITIONS, type ItemStatus, type SupplierOrderItemDTO } from '@havuz/core';
+import { formatTRY, ITEM_STATUS_LABEL, ITEM_TRANSITIONS, PAYOUT_STATUS_LABEL, type ItemStatus, type SupplierOrderItemDTO } from '@havuz/core';
 import { useSupplierItems, useUpdateSupplierItem } from '@havuz/sdk';
 import { PageHeader } from '@/components/app/page-header';
 import { Card } from '@/components/ui/card';
@@ -146,7 +146,12 @@ export default function SupplierOrders() {
                           </div>
                           <span className="w-24 text-right text-sm font-semibold tabular">{formatTRY(i.qty * i.unitPrice)}</span>
                           {tab === 'done' ? (
-                            <Badge tone={i.status === 'delivered' ? 'success' : 'neutral'}>{ITEM_STATUS_LABEL[i.status]}</Badge>
+                            <span className="flex flex-col items-end gap-1">
+                              <Badge tone={i.status === 'delivered' ? 'success' : 'neutral'}>{ITEM_STATUS_LABEL[i.status]}</Badge>
+                              {i.status !== 'cancelled' && (
+                                <span className="text-[11px] text-fg-subtle">{PAYOUT_STATUS_LABEL[i.payoutStatus]}</span>
+                              )}
+                            </span>
                           ) : (
                             <div className="flex gap-1">
                               {ITEM_TRANSITIONS[i.status].includes('cancelled') && (

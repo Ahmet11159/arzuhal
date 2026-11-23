@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { KeyRound, ShieldCheck, UserPlus, Users } from 'lucide-react';
-import { formatIban, passwordProblem, type CreatedAccountDTO } from '@havuz/core';
+import { passwordProblem, type CreatedAccountDTO } from '@havuz/core';
+import { SupplierPayoutCard } from '@/components/payout/payout-profile-form';
 import { ApiError, useChangePassword, useInviteUser, useSetUserActive, useSettings, useUpdateProfile } from '@havuz/sdk';
 import { PageHeader } from '@/components/app/page-header';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -18,7 +19,7 @@ import { TempPasswordNotice } from './temp-password';
 
 const errMsg = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : 'İşlem başarısız');
 
-/** Tüm roller için ortak ayarlar: profil, kuruluş iletişim bilgileri, IBAN (tedarikçi), şifre, ekip. */
+/** Tüm roller için ortak ayarlar: profil, kuruluş iletişim bilgileri, ödeme bilgileri (tedarikçi), şifre, ekip. */
 export function SettingsView() {
   const { data, isLoading, error, refetch } = useSettings();
   const profile = useUpdateProfile();
@@ -27,7 +28,6 @@ export function SettingsView() {
   const [phone, setPhone] = useState('');
   const [orgEmail, setOrgEmail] = useState('');
   const [orgPhone, setOrgPhone] = useState('');
-  const [iban, setIban] = useState('');
   const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
@@ -36,7 +36,6 @@ export function SettingsView() {
     setPhone(data.user.phone ?? '');
     setOrgEmail(data.org.email ?? '');
     setOrgPhone(data.org.phone ?? '');
-    setIban(data.org.iban ? formatIban(data.org.iban) : '');
   }, [data]);
 
   if (isLoading) return <PageSkeleton />;
@@ -50,7 +49,6 @@ export function SettingsView() {
         name,
         phone: phone.trim() || null,
         ...(owner ? { orgEmail: orgEmail.trim() || null, orgPhone: orgPhone.trim() || null } : {}),
-        ...(owner && isSupplier ? { iban: iban.trim() || null } : {}),
       });
       toast.success('Bilgiler kaydedildi');
     } catch (e) {
@@ -79,11 +77,6 @@ export function SettingsView() {
                 <Input value={orgPhone} onChange={(e) => setOrgPhone(e.target.value)} disabled={!owner} type="tel" />
               </Field>
             </div>
-            {isSupplier && (
-              <Field label="Hakediş IBAN’ı" hint="Hakediş ödemeleri bu hesaba yapılır. TR ile başlayan 26 karakter.">
-                <Input value={iban} onChange={(e) => setIban(e.target.value.toUpperCase())} disabled={!owner} placeholder="TR00 0000 0000 0000 0000 0000 00" className="font-mono" />
-              </Field>
-            )}
             <Button onClick={saveProfile} loading={profile.isPending}>
               Kaydet
             </Button>
@@ -91,6 +84,8 @@ export function SettingsView() {
         </Card>
 
         <PasswordCard />
+
+        {isSupplier && <SupplierPayoutCard owner={owner} />}
 
         <Card className="overflow-hidden xl:col-span-2">
           <CardHeader

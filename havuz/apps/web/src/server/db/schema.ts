@@ -29,6 +29,20 @@ export const organizations = pgTable(
     /** Tedarikçi hakediş ödemeleri için. */
     iban: text('iban'),
     commissionBps: integer('commission_bps').notNull().default(300),
+    /** Açık adres (teslimat, fatura ve iyzico alt satıcı kaydı için). */
+    address: text('address'),
+    // --- iyzico Pazaryeri alt satıcı (tedarikçi) bilgileri ---
+    subMerchantType: text('sub_merchant_type', { enum: ['PERSONAL', 'PRIVATE_COMPANY', 'LIMITED_OR_JOINT_STOCK_COMPANY'] }),
+    legalTitle: text('legal_title'),
+    taxOffice: text('tax_office'),
+    /** T.C. kimlik no (bireysel ve şahıs şirketi). */
+    identityNumber: text('identity_number'),
+    /** Yetkili kişi ad soyad. */
+    contactName: text('contact_name'),
+    /** iyzico'nun verdiği alt satıcı anahtarı; ödemeler bu anahtarla bölünür. */
+    subMerchantKey: text('sub_merchant_key'),
+    subMerchantError: text('sub_merchant_error'),
+    subMerchantSyncedAt: timestamp('sub_merchant_synced_at', { withTimezone: true }),
     rating: real('rating').notNull().default(4.5),
     onTimeRate: real('on_time_rate').notNull().default(0.95),
     createdAt: createdAt(),
@@ -81,6 +95,8 @@ export const products = pgTable(
     vatRate: integer('vat_rate').notNull().default(20),
     /** Piyasa referans fiyatı (kuruş, KDV hariç) — tasarruf hesabının bazı. */
     marketPrice: integer('market_price').notNull(),
+    /** Küçültülmüş ürün fotoğrafı (data URL, ~50 KB). Production'da nesne depolamaya taşınabilir. */
+    image: text('image'),
   },
   (t) => [index('product_category_idx').on(t.categoryId)],
 );
@@ -145,11 +161,16 @@ export const orders = pgTable(
     subtotal: integer('subtotal').notNull(),
     vat: integer('vat').notNull(),
     financingFee: integer('financing_fee').notNull().default(0),
+    /** Vade farkı oranı (bps); borç yeniden hesaplanırken kullanılır. */
+    financingBps: integer('financing_bps').notNull().default(0),
+    /** Eski kredi sistemi (pazaryeri modelinde kullanılmaz; geçmiş siparişler için tutulur). */
     creditApplied: integer('credit_applied').notNull().default(0),
     total: integer('total').notNull(),
     marketTotal: integer('market_total').notNull(),
     waveCredit: integer('wave_credit').notNull().default(0),
     note: text('note'),
+    /** Üyenin kullanım ve iptal-iade koşullarını onayladığı an. */
+    termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
     createdAt: createdAt(),
     confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
     shippedAt: timestamp('shipped_at', { withTimezone: true }),
@@ -184,7 +205,17 @@ export const orderItems = pgTable(
       .notNull()
       .default('pending'),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
-    /** Bu kalemin tedarikçiye ödendiği hakediş. */
+    /**
+     * Tedarikçi ödemesinin serbest bırakıldığı an (teslim + itiraz süresi; pazaryerinde iyzico ürün onayı).
+     * Serbest bırakılırken nihai tutarlar aşağıdaki alanlara dondurulur.
+     */
+    releasedAt: timestamp('released_at', { withTimezone: true }),
+    chargeAmount: integer('charge_amount'),
+    issueDeduction: integer('issue_deduction'),
+    commissionAmount: integer('commission_amount'),
+    commissionVat: integer('commission_vat'),
+    supplierShare: integer('supplier_share'),
+    /** Bu kalemin yer aldığı hakediş (mutabakat) belgesi. */
     settlementId: text('settlement_id'),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -239,6 +270,9 @@ export const leads = pgTable('leads', {
   city: text('city').notNull(),
   businessType: text('business_type', { enum: ['cafe', 'restaurant', 'bakery', 'bar', 'hotel', 'catering'] }).notNull(),
   monthlySpend: integer('monthly_spend'),
+  /** KVKK aydınlatma metninin okunduğu onayı (zaman + metin sürümü). */
+  consentAt: timestamp('consent_at', { withTimezone: true }),
+  consentVersion: text('consent_version'),
   status: text('status', { enum: ['new', 'approved', 'rejected'] }).notNull().default('new'),
   orgId: text('org_id'),
   createdAt: createdAt(),
@@ -281,6 +315,98 @@ export const payments = pgTable(
   (t) => [index('payment_org_idx').on(t.orgId), index('payment_order_idx').on(t.orderId), index('payment_token_idx').on(t.providerToken)],
 );
 
+/**
+ * Ödeme sepetindeki kalemler. Pazaryerinde her sipariş kalemi ayrı bir sepet kalemidir:
+ * iyzico tedarikçi payını (subMerchantPrice) bu kalem üzerinden ayırır, iade ve ürün onayı da
+ * kalemin işlem numarasıyla (providerTxnId) yapılır.
+ */
+export const paymentItems = pgTable(
+  'payment_items',
+  {
+    id: id(),
+    paymentId: text('payment_id')
+      .notNull()
+      .references(() => payments.id, { onDelete: 'cascade' }),
+    orderItemId: text('order_item_id').references(() => orderItems.id),
+    supplierId: text('supplier_id').references(() => organizations.id),
+    /** Üyeden alınan tutar (KDV ve vade farkı dahil). */
+    price: integer('price').notNull(),
+    subMerchantKey: text('sub_merchant_key'),
+    subMerchantPrice: integer('sub_merchant_price'),
+    providerTxnId: text('provider_txn_id'),
+    refundedAmount: integer('refunded_amount').notNull().default(0),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    approvalError: text('approval_error'),
+    approvalAttempts: integer('approval_attempts').notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index('payment_item_payment_idx').on(t.paymentId), index('payment_item_order_item_idx').on(t.orderItemId)],
+);
+
+/** Karta iadeler. Önce kaydedilir, sonra sağlayıcıya gönderilir (iade asla kaybolmaz, iki kez yapılmaz). */
+export const refunds = pgTable(
+  'refunds',
+  {
+    id: id(),
+    paymentItemId: text('payment_item_id')
+      .notNull()
+      .references(() => paymentItems.id),
+    paymentId: text('payment_id')
+      .notNull()
+      .references(() => payments.id),
+    orgId: text('org_id')
+      .notNull()
+      .references(() => organizations.id),
+    orderId: text('order_id').references(() => orders.id),
+    orderItemId: text('order_item_id').references(() => orderItems.id),
+    amount: integer('amount').notNull(),
+    reason: text('reason', { enum: ['item_cancelled', 'issue', 'wave_rebate', 'duplicate_payment', 'order_cancelled', 'subscription_duplicate'] }).notNull(),
+    description: text('description').notNull(),
+    status: text('status', { enum: ['pending', 'processing', 'succeeded', 'failed', 'needs_review'] }).notNull().default('pending'),
+    providerRefundId: text('provider_refund_id'),
+    error: text('error'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: createdAt(),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [index('refund_status_idx').on(t.status, t.nextAttemptAt), index('refund_org_idx').on(t.orgId), index('refund_order_idx').on(t.orderId)],
+);
+
+/** Tedarikçinin sipariş için yüklediği fatura (e-Fatura/e-Arşiv PDF'i veya görseli). */
+export const invoices = pgTable(
+  'invoices',
+  {
+    id: id(),
+    orderId: text('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    supplierId: text('supplier_id')
+      .notNull()
+      .references(() => organizations.id),
+    number: text('number').notNull(),
+    issuedAt: timestamp('issued_at', { withTimezone: true }).notNull(),
+    /** KDV dahil fatura tutarı */
+    amount: integer('amount').notNull(),
+    fileName: text('file_name').notNull(),
+    mime: text('mime').notNull(),
+    size: integer('size').notNull(),
+    /** Dosya (data URL, en fazla ~2 MB). Production'da nesne depolamaya taşınabilir. */
+    fileData: text('file_data').notNull(),
+    uploadedBy: text('uploaded_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('invoice_order_supplier_uq').on(t.orderId, t.supplierId), index('invoice_supplier_idx').on(t.supplierId)],
+);
+
+/** Yönetimin düzenlediği site ayarları (şirket bilgileri vb.). */
+export const siteSettings = pgTable('site_settings', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').$type<Record<string, unknown>>().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Tedarikçi hakedişi: teslim edilen kalemlerin komisyon ve iadeler düşülmüş ödemesi. */
 export const settlements = pgTable(
   'settlements',
@@ -296,7 +422,10 @@ export const settlements = pgTable(
     grossSales: integer('gross_sales').notNull(),
     commission: integer('commission').notNull(),
     issueDeductions: integer('issue_deductions').notNull().default(0),
+    commissionVat: integer('commission_vat').notNull().default(0),
     netAmount: integer('net_amount').notNull(),
+    /** iyzico: pazaryeri ödemesi (iyzico öder); manual: Havuz havale eder (pazaryeri kapalıyken). */
+    channel: text('channel', { enum: ['iyzico', 'manual'] }).notNull().default('manual'),
     status: text('status', { enum: ['pending', 'paid'] }).notNull().default('pending'),
     reference: text('reference'),
     iban: text('iban'),
@@ -400,6 +529,8 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   member: one(organizations, { fields: [orders.memberId], references: [organizations.id] }),
   wave: one(waves, { fields: [orders.waveId], references: [waves.id] }),
   items: many(orderItems),
+  invoices: many(invoices),
+  refunds: many(refunds),
 }));
 export const orderItemsRelations = relations(orderItems, ({ one }) => ({
   order: one(orders, { fields: [orderItems.orderId], references: [orders.id] }),
@@ -411,9 +542,25 @@ export const orderItemsRelations = relations(orderItems, ({ one }) => ({
 export const issuesRelations = relations(issues, ({ one }) => ({
   item: one(orderItems, { fields: [issues.orderItemId], references: [orderItems.id] }),
 }));
-export const paymentsRelations = relations(payments, ({ one }) => ({
+export const paymentsRelations = relations(payments, ({ one, many }) => ({
   org: one(organizations, { fields: [payments.orgId], references: [organizations.id] }),
   order: one(orders, { fields: [payments.orderId], references: [orders.id] }),
+  items: many(paymentItems),
+}));
+export const paymentItemsRelations = relations(paymentItems, ({ one, many }) => ({
+  payment: one(payments, { fields: [paymentItems.paymentId], references: [payments.id] }),
+  orderItem: one(orderItems, { fields: [paymentItems.orderItemId], references: [orderItems.id] }),
+  refunds: many(refunds),
+}));
+export const refundsRelations = relations(refunds, ({ one }) => ({
+  paymentItem: one(paymentItems, { fields: [refunds.paymentItemId], references: [paymentItems.id] }),
+  payment: one(payments, { fields: [refunds.paymentId], references: [payments.id] }),
+  org: one(organizations, { fields: [refunds.orgId], references: [organizations.id] }),
+  order: one(orders, { fields: [refunds.orderId], references: [orders.id] }),
+}));
+export const invoicesRelations = relations(invoices, ({ one }) => ({
+  order: one(orders, { fields: [invoices.orderId], references: [orders.id] }),
+  supplier: one(organizations, { fields: [invoices.supplierId], references: [organizations.id] }),
 }));
 export const settlementsRelations = relations(settlements, ({ one }) => ({
   supplier: one(organizations, { fields: [settlements.supplierId], references: [organizations.id] }),

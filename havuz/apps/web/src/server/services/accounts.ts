@@ -186,6 +186,11 @@ export async function updateProfile(db: DB, session: SessionPayload, raw: unknow
     }
     await audit(tx, actor, 'profile.update', 'user', session.sub, `Profil güncellendi: ${Object.keys(input).join(', ')}`);
   });
+  // IBAN veya iletişim bilgisi değiştiyse iyzico alt satıcı kaydı da güncellenir.
+  if (session.role === 'supplier' && (input.iban !== undefined || input.orgEmail !== undefined || input.orgPhone !== undefined)) {
+    const { syncSubMerchant } = await import('./payout-profile');
+    await syncSubMerchant(db, session.org, actor);
+  }
 }
 
 export async function inviteUser(db: DB, session: SessionPayload, raw: unknown, actor: Actor): Promise<CreatedAccountDTO> {

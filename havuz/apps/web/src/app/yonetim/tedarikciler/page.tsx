@@ -1,12 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { Pencil, Plus, Star } from 'lucide-react';
+import { Landmark, Pencil, Plus, Star } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { OrgFormSheet, type OrgFormValues } from '@/components/admin/org-form-sheet';
 import { formatPercent, formatTRY, formatTRYWhole } from '@havuz/core';
-import { useAdminSuppliers } from '@havuz/sdk';
+import { useAdminPayoutProfile, useAdminSuppliers, useSyncSupplier, useUpdateAdminPayoutProfile } from '@havuz/sdk';
+import { Sheet } from '@/components/ui/sheet';
+import { PayoutProfileForm, PayoutStatusBadge } from '@/components/payout/payout-profile-form';
 import { PageHeader } from '@/components/app/page-header';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -15,11 +18,12 @@ import { ErrorState } from '@/components/ui/empty';
 export default function AdminSuppliers() {
   const { data, isLoading, error, refetch } = useAdminSuppliers();
   const [form, setForm] = useState<{ open: boolean; initial: OrgFormValues | null }>({ open: false, initial: null });
+  const [payout, setPayout] = useState<{ id: string; name: string } | null>(null);
   return (
     <div>
       <PageHeader
         title="Tedarikçiler"
-        description="Performans karnesi: hacim, komisyon, zamanında teslim, mal kabul sorunları ve bekleyen hakediş."
+        description="Performans karnesi: hacim, komisyon, zamanında teslim, mal kabul sorunları, ödeme (iyzico) kaydı ve bekleyen hakediş."
         action={
           <Button onClick={() => setForm({ open: true, initial: null })}>
             <Plus className="h-4 w-4" /> Yeni tedarikçi
@@ -62,7 +66,18 @@ export default function AdminSuppliers() {
                 <span className="text-fg-muted">Bekleyen hakediş</span>
                 <span className="font-semibold tabular">{formatTRY(s.pendingPayout)}</span>
               </div>
-              {!s.iban && <div className="mt-2 text-xs text-warning">IBAN girilmemiş</div>}
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <PayoutStatusBadge p={{ status: s.payout, marketplace: true }} />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPayout({ id: s.id, name: s.name });
+                  }}
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-primary hover:bg-primary-soft"
+                >
+                  <Landmark className="h-3.5 w-3.5" /> Ödeme bilgileri
+                </button>
+              </div>
               <dl className="mt-4 grid grid-cols-3 gap-2 border-t border-border pt-4 text-center">
                 <div>
                   <dt className="text-[11px] text-fg-subtle">Zamanında</dt>
@@ -82,6 +97,52 @@ export default function AdminSuppliers() {
         </div>
       )}
       <OrgFormSheet type="supplier" open={form.open} initial={form.initial} onClose={() => setForm({ open: false, initial: null })} />
+      <PayoutSheet target={payout} onClose={() => setPayout(null)} />
     </div>
+  );
+}
+
+function PayoutSheet({ target, onClose }: { target: { id: string; name: string } | null; onClose: () => void }) {
+  const { data } = useAdminPayoutProfile(target?.id ?? null);
+  const update = useUpdateAdminPayoutProfile();
+  const sync = useSyncSupplier();
+  return (
+    <Sheet
+      open={!!target}
+      onClose={onClose}
+      title={target ? `${target.name} · ödeme bilgileri` : ''}
+      footer={
+        data?.marketplace && data.status.complete ? (
+          <Button
+            variant="secondary"
+            className="w-full"
+            loading={sync.isPending}
+            onClick={async () => {
+              const r = await sync.mutateAsync(target!.id).catch((e: Error) => ({ synced: false, reason: e.message }));
+              if (r.synced) toast.success('iyzico kaydı güncellendi');
+              else toast.error(r.reason ?? 'Kaydedilemedi');
+            }}
+          >
+            iyzico’ya yeniden gönder
+          </Button>
+        ) : undefined
+      }
+    >
+      {!data ? (
+        <Skeleton className="h-64" />
+      ) : (
+        <div className="space-y-3">
+          <PayoutStatusBadge p={data} />
+          <PayoutProfileForm
+            profile={data}
+            editable
+            saving={update.isPending}
+            onSave={async (input) => {
+              await update.mutateAsync({ id: target!.id, input });
+            }}
+          />
+        </div>
+      )}
+    </Sheet>
   );
 }

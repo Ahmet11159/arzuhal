@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { Banknote, Check, ChevronRight, FilePlus2 } from 'lucide-react';
-import { formatIban, formatTRY, SETTLEMENT_STATUS_LABEL, type SettlementDTO } from '@havuz/core';
+import { formatIban, formatTRY, SETTLEMENT_STATUS_LABEL, trInputValue, type SettlementDTO } from '@havuz/core';
 import { ApiError, useAdminPayouts, useCreateSettlements, useMarkSettlementPaid } from '@havuz/sdk';
 import { PageHeader } from '@/components/app/page-header';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -17,7 +17,8 @@ import { PageSkeleton } from '@/components/ui/skeleton';
 import { EmptyState, ErrorState } from '@/components/ui/empty';
 import { fmtDate } from '@/lib/format';
 
-const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/** Türkiye saatine göre "YYYY-AA-GG". */
+const isoDay = (d: Date) => trInputValue(d).slice(0, 10);
 
 export default function AdminPayoutsPage() {
   const { data, isLoading, error, refetch } = useAdminPayouts();
@@ -35,10 +36,10 @@ export default function AdminPayoutsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Hakedişler"
-        description="Tedarikçilere ödeme: teslim edilen kalemler dönem sonunda hakedişe dönüşür; banka havalesi yapılınca referansla ödendi işaretlenir."
+        description="Teslim + 48 saat itiraz süresi dolan kalemler onaylanır (pazaryerinde iyzico ürün onayı) ve tedarikçi payı serbest kalır. Dönem sonunda bu kalemler hakediş belgesine (komisyon faturasının dayanağı) dönüşür. iyzico kanalındaki hakedişleri iyzico öder; havale kanalındakiler ödenince referansla işaretlenir."
       />
       <Card>
-        <CardHeader title="Hakedişe girmeyi bekleyen teslimatlar" description={`Toplam net ${formatTRY(totalPending)} · tedarikçi bazında`} />
+        <CardHeader title="Onaylanmış, belgeye girmeyi bekleyen kalemler" description={`Toplam tedarikçi payı ${formatTRY(totalPending)} · tedarikçi bazında`} />
         <CardBody className="space-y-5">
           {data.pending.length === 0 ? (
             <p className="text-sm text-fg-muted">Bekleyen teslimat yok.</p>
@@ -57,7 +58,7 @@ export default function AdminPayoutsPage() {
             </ul>
           )}
           <div className="flex flex-wrap items-end gap-3">
-            <Field label="Dönem sonu (bu tarihe kadar teslim edilenler)">
+            <Field label="Dönem sonu (bu tarihe kadar onaylananlar)">
               <Input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} max={isoDay(new Date())} />
             </Field>
             <Button
@@ -65,8 +66,8 @@ export default function AdminPayoutsPage() {
               disabled={data.pending.length === 0}
               onClick={async () => {
                 try {
-                  const end = new Date(`${periodEnd}T23:59:59`);
-                  const r = await create.mutateAsync({ periodEnd: (end > new Date() ? new Date() : end).toISOString() });
+                  // Gün sonu Türkiye saatine göre sunucuda hesaplanır.
+                  const r = await create.mutateAsync({ periodEnd });
                   toast.success(r.created.length ? `${r.created.length} hakediş oluşturuldu` : 'Bu döneme ait yeni teslimat yok');
                 } catch (e) {
                   toast.error(e instanceof ApiError ? e.message : 'Oluşturulamadı');
@@ -88,8 +89,8 @@ export default function AdminPayoutsPage() {
               value={tab}
               onChange={setTab}
               options={[
-                { value: 'pending', label: 'Ödeme bekleyen' },
-                { value: 'paid', label: 'Ödenen' },
+                { value: 'pending', label: 'Havale bekleyen' },
+                { value: 'paid', label: 'Ödenen / iyzico' },
               ]}
             />
           }
@@ -110,9 +111,9 @@ export default function AdminPayoutsPage() {
                     Dönem sonu {fmtDate(s.periodEnd)} · {s.itemCount} kalem{s.reference ? ` · ref ${s.reference}` : ''}
                   </div>
                 </Link>
-                <Badge tone={s.status === 'paid' ? 'success' : 'warning'}>{SETTLEMENT_STATUS_LABEL[s.status]}</Badge>
+                <Badge tone={s.status === 'paid' ? 'success' : 'warning'}>{s.channel === 'iyzico' ? 'iyzico öder' : SETTLEMENT_STATUS_LABEL[s.status]}</Badge>
                 <span className="w-32 text-right font-semibold tabular">{formatTRY(s.netAmount)}</span>
-                {s.status === 'pending' ? (
+                {s.status === 'pending' && s.channel === 'manual' ? (
                   <Button size="sm" onClick={() => setPaying(s)}>
                     <Check className="h-3.5 w-3.5" /> Ödendi
                   </Button>

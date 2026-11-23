@@ -59,10 +59,10 @@ export const ISSUE_STATUS_LABEL: Record<IssueStatus, string> = {
 };
 
 export const LEDGER_TYPE_LABEL: Record<LedgerType, string> = {
-  wave_rebate: 'Dalga kademe iadesi',
+  wave_rebate: 'Dalga kademe farkı',
   issue_credit: 'Mal kabul iadesi',
   credit_used: 'Siparişte kullanılan kredi',
-  adjustment: 'Düzeltme',
+  adjustment: 'İptal / iade',
 };
 
 export const PLAN_LABEL: Record<Plan, string> = { free: 'Temel', pro: 'Pro' };
@@ -99,3 +99,13 @@ export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
   approved: 'Hesap açıldı',
   rejected: 'Reddedildi',
 };
+
+/** Tedarikçinin sipariş kalemindeki ödeme durumu. */
+export const PAYOUT_STATUS_LABEL = {
+  awaiting_payment: 'Üye ödemesi bekleniyor',
+  in_progress: 'Teslimat sürüyor',
+  objection_period: 'İtiraz süresinde (48 saat)',
+  released: 'Ödemesi onaylandı',
+  settled: 'Hakedişe girdi',
+  cancelled: 'İptal',
+} as const;

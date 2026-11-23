@@ -15,15 +15,17 @@ import { badRequest, notFound } from '../http';
 import { activeWaveDTO, DAY, itemFacts, lastMonths, monthKey, type ItemFact } from './common';
 import { audit, type Actor } from '../audit';
 import { notify } from '../notify';
-import { formatTRY, computeSettlement } from '@havuz/core';
-import { isNull } from 'drizzle-orm';
+import { applyOrderChange, kickRefunds } from './money-flow';
+import { formatTRY, trMonthStart } from '@havuz/core';
+import { isNotNull, isNull } from 'drizzle-orm';
+import { payoutStatus } from './payout-profile';
 
 const volume = (fs: ItemFact[]) => fs.reduce((a, f) => a + f.qty * f.finalUnitPrice, 0);
 const commission = (fs: ItemFact[]) => fs.reduce((a, f) => a + Math.round((f.qty * f.finalUnitPrice * f.commissionBps) / 10_000), 0);
 
 export async function adminOverview(db: DB): Promise<AdminOverviewDTO> {
   const now = new Date();
-  const facts = await itemFacts(db, { since: new Date(now.getFullYear(), now.getMonth() - 5, 1) });
+  const facts = await itemFacts(db, { since: trMonthStart(now, -5) });
   const d30 = new Date(now.getTime() - 30 * DAY);
   const d60 = new Date(now.getTime() - 60 * DAY);
   const last30 = facts.filter((f) => f.createdAt > d30);
@@ -32,11 +34,11 @@ export async function adminOverview(db: DB): Promise<AdminOverviewDTO> {
   const orders6 = await db
     .select({ createdAt: s.orders.createdAt, financingFee: s.orders.financingFee })
     .from(s.orders)
-    .where(gt(s.orders.createdAt, new Date(now.getFullYear(), now.getMonth() - 5, 1)));
+    .where(gt(s.orders.createdAt, trMonthStart(now, -5)));
   const subs6 = await db
     .select({ periodStart: s.subscriptions.periodStart, amount: s.subscriptions.amount })
     .from(s.subscriptions)
-    .where(gt(s.subscriptions.periodStart, new Date(now.getFullYear(), now.getMonth() - 6, 1)));
+    .where(gt(s.subscriptions.periodStart, trMonthStart(now, -6)));
   const [sp] = await db.select({ v: sum(s.offers.sponsoredFee).mapWith(Number) }).from(s.offers).where(eq(s.offers.sponsored, true));
   const sponsoredMonthly = sp?.v ?? 0;
   const [pro] = await db.select({ n: count() }).from(s.organizations).where(and(eq(s.organizations.type, 'member'), eq(s.organizations.plan, 'pro')));
@@ -163,10 +165,11 @@ export async function adminSuppliers(db: DB): Promise<AdminSupplierDTO[]> {
     .groupBy(s.orderItems.supplierId);
   const oc = Object.fromEntries(offerCounts.map((r) => [r.supplierId, r.n]));
   const ic = Object.fromEntries(issueCounts.map((r) => [r.supplierId, r.n]));
+  // Serbest bırakılmış ama henüz hakediş belgesine girmemiş tedarikçi payları
   const unsettled = await db
-    .select({ supplierId: s.orderItems.supplierId, qty: s.orderItems.qty, finalUnitPrice: s.orderItems.finalUnitPrice, vatRate: s.orderItems.vatRate, commissionBps: s.orderItems.commissionBps })
+    .select({ supplierId: s.orderItems.supplierId, supplierShare: s.orderItems.supplierShare })
     .from(s.orderItems)
-    .where(and(eq(s.orderItems.status, 'delivered'), isNull(s.orderItems.settlementId)));
+    .where(and(isNotNull(s.orderItems.releasedAt), isNull(s.orderItems.settlementId)));
   return sups
     .map((x) => ({
       id: x.id,
@@ -183,7 +186,8 @@ export async function adminSuppliers(db: DB): Promise<AdminSupplierDTO[]> {
       email: x.email,
       phone: x.phone,
       district: x.district,
-      pendingPayout: computeSettlement(unsettled.filter((u) => u.supplierId === x.id)).netAmount,
+      pendingPayout: unsettled.filter((u) => u.supplierId === x.id).reduce((a, u) => a + (u.supplierShare ?? 0), 0),
+      payout: payoutStatus(x),
     }))
     .sort((p, q) => q.gmv90 - p.gmv90);
 }
@@ -229,8 +233,16 @@ export async function adminIssues(db: DB): Promise<AdminIssueDTO[]> {
   }));
 }
 
-/** Sorun çözümü: onaylanırsa üyeye kredi yazılır (varsayılan: KDV dahil kalem bedeli). */
+/**
+ * Sorun çözümü. Onaylanırsa bedel (varsayılan: sorunlu adetlerin KDV dahil bedeli) üyeye döner:
+ * ödenmiş siparişte karta iade, ödenmemişte borçtan düşüm. Tedarikçinin payı aynı oranda azalır.
+ */
 export async function resolveIssue(db: DB, id: string, raw: unknown, actor: Actor = {}) {
+  await resolveIssueTx(db, id, raw, actor);
+  kickRefunds(db);
+}
+
+async function resolveIssueTx(db: DB, id: string, raw: unknown, actor: Actor) {
   const input = resolveIssueInput.parse(raw);
   await db.transaction(async (tx) => {
     // Satır kilidi: aynı bildirimin iki kez onaylanıp iki kez kredi yazılması engellenir.
@@ -239,25 +251,23 @@ export async function resolveIssue(db: DB, id: string, raw: unknown, actor: Acto
     if (!issue) throw notFound('Bildirim');
     if (issue.status !== 'open') throw badRequest('Bildirim zaten sonuçlandırıldı');
     const it = issue.item;
-    const credit =
+    // Kalemin KDV dahil bedelini aşamaz.
+    const net = it.qty * it.finalUnitPrice;
+    const itemGross = net + Math.round((net * it.vatRate) / 100);
+    const requested =
       input.status === 'resolved' ? input.creditAmount ?? Math.round(issue.qty * it.finalUnitPrice * (1 + it.vatRate / 100)) : 0;
+    const credit = Math.min(requested, itemGross);
     await tx.update(s.issues).set({ status: input.status, creditAmount: credit, resolvedAt: new Date() }).where(eq(s.issues.id, id));
-    if (credit > 0) {
-      await tx.insert(s.ledgerEntries).values({
-        orgId: it.order.memberId,
-        type: 'issue_credit',
-        amount: credit,
-        description: `${it.order.number} mal kabul iadesi`,
-        refId: it.order.id,
-      });
-    }
+    const money = credit > 0 ? await applyOrderChange(tx, it.order.id, 'issue', 'Mal kabul iadesi') : { mode: 'none' as const, amount: 0 };
     await notify(tx, {
       orgId: it.order.memberId,
       type: `issue.${input.status}`,
       title: input.status === 'resolved' ? `Bildiriminiz onaylandı: ${formatTRY(credit)} iade` : 'Mal kabul bildiriminiz reddedildi',
       body:
         input.status === 'resolved'
-          ? `${it.order.number} için iade kredi bakiyenize eklendi.`
+          ? money.mode === 'reduced'
+            ? `${it.order.number} için ${formatTRY(money.amount)} ödeyeceğiniz tutardan düşüldü.`
+            : `${it.order.number} için ${formatTRY(money.amount || credit)} kartınıza iade ediliyor.`
           : `${it.order.number} için yaptığınız bildirim incelendi ve reddedildi. Sorularınız için destek ekibine yazabilirsiniz.`,
       link: `/uye/siparisler/${it.order.id}`,
       email: true,
@@ -267,7 +277,7 @@ export async function resolveIssue(db: DB, id: string, raw: unknown, actor: Acto
         orgId: it.supplierId,
         type: 'issue.deduction',
         title: `Mal kabul iadesi: ${formatTRY(credit)}`,
-        body: `${it.order.number} için onaylanan iade bir sonraki hakedişinizden düşülecek.`,
+        body: `${it.order.number} için onaylanan iade bu kalemin ödemesinden düşüldü (komisyon da aynı oranda azaldı).`,
         link: '/tedarikci/hakedis',
       });
     }

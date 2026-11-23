@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
-import { AlertTriangle, ArrowLeft, Camera, Check, Gift, PackageCheck, Repeat } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Camera, Check, Download, FileText, Gift, PackageCheck, Repeat, Undo2 } from 'lucide-react';
 import {
   formatTRY,
   ISSUE_STATUS_LABEL,
@@ -14,6 +14,8 @@ import {
   ITEM_STATUS_LABEL,
   ORDER_STATUS_LABEL,
   PAYMENT_TERM_LABEL,
+  REFUND_REASON_LABEL,
+  REFUND_STATUS_LABEL,
   type IssueType,
   type OrderItemDTO,
 } from '@havuz/core';
@@ -110,7 +112,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               </span>
               <div>
                 <div className="font-semibold">Ödeme bekleniyor · {formatTRY(o.total)}</div>
-                <p className="mt-0.5 text-sm text-fg-muted">Stok sizin için ayrıldı. Süre dolarsa sipariş otomatik iptal edilir ve kullandığınız kredi iade edilir. Tedarikçi siparişi ödemeden sonra görür.</p>
+                <p className="mt-0.5 text-sm text-fg-muted">Stok sizin için ayrıldı. Süre dolarsa sipariş otomatik iptal edilir; sizden ödeme alınmaz. Tedarikçi siparişi ödemeden sonra görür.</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -187,7 +189,12 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               <ul className="divide-y divide-border">
                 {items.map((it) => (
                   <li key={it.id} className="flex flex-wrap items-center gap-4 px-5 py-4 sm:flex-nowrap">
-                    <CategoryIcon name={it.categoryIcon} />
+                    {it.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={it.image} alt="" className="h-10 w-10 shrink-0 rounded-xl object-cover ring-1 ring-border" />
+                    ) : (
+                      <CategoryIcon name={it.categoryIcon} />
+                    )}
                     <div className="min-w-0 flex-1">
                       <div className="font-medium">{it.productName}</div>
                       <div className="text-xs text-fg-muted">
@@ -211,8 +218,12 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
                     </div>
                     <Badge tone={it.status === 'delivered' ? 'success' : it.status === 'shipped' ? 'primary' : it.status === 'cancelled' ? 'neutral' : 'warning'}>{ITEM_STATUS_LABEL[it.status]}</Badge>
                     <div className="w-24 text-right font-semibold tabular">{formatTRY(it.qty * it.finalUnitPrice)}</div>
-                    {it.status === 'delivered' && !it.issue && (
-                      <button onClick={() => setIssueItem(it)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-fg-muted hover:bg-warning-soft hover:text-warning">
+                    {it.status === 'delivered' && !it.issue && it.issueDeadline && new Date(it.issueDeadline) > new Date() && (
+                      <button
+                        onClick={() => setIssueItem(it)}
+                        title={`Son bildirim: ${fmtDateTime(it.issueDeadline)}`}
+                        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-fg-muted hover:bg-warning-soft hover:text-warning"
+                      >
                         <AlertTriangle className="h-3.5 w-3.5" /> Sorun bildir
                       </button>
                     )}
@@ -228,6 +239,56 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               </CardBody>
             </Card>
           )}
+          {o.refunds.length > 0 && (
+            <Card className="overflow-hidden">
+              <CardHeader title="Karta iadeler" description="Bankanıza göre hesabınıza yansıması birkaç iş günü sürebilir" />
+              <ul className="mt-3 divide-y divide-border border-t border-border">
+                {o.refunds.map((r) => (
+                  <li key={r.id} className="flex items-center gap-3 px-5 py-3 text-sm">
+                    <Undo2 className="h-4 w-4 shrink-0 text-success" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate">{REFUND_REASON_LABEL[r.reason]}</div>
+                      <div className="text-xs text-fg-subtle">{fmtDateTime(r.createdAt)}</div>
+                    </div>
+                    <Badge tone={r.status === 'succeeded' ? 'success' : r.status === 'needs_review' ? 'danger' : 'warning'}>{REFUND_STATUS_LABEL[r.status]}</Badge>
+                    <span className="w-24 text-right font-semibold tabular">{formatTRY(r.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+          <Card className="overflow-hidden">
+            <CardHeader title="Faturalar" description="Ürün faturalarını tedarikçiler keser ve buraya yükler" />
+            {o.invoices.length === 0 ? (
+              <CardBody className="pt-2 text-sm text-fg-muted">
+                <span className="inline-flex items-center gap-2">
+                  <FileText className="h-4 w-4" /> Henüz fatura yüklenmedi. Tedarikçiler teslimattan sonra faturalarını yükler.
+                </span>
+              </CardBody>
+            ) : (
+              <ul className="mt-3 divide-y divide-border border-t border-border">
+                {o.invoices.map((v) => (
+                  <li key={v.id} className="flex items-center gap-3 px-5 py-3 text-sm">
+                    <FileText className="h-4 w-4 shrink-0 text-fg-muted" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium">{v.supplier.name}</div>
+                      <div className="text-xs text-fg-subtle">
+                        No {v.number} · {fmtDate(v.issuedAt)} · {formatTRY(v.amount)}
+                      </div>
+                    </div>
+                    <a
+                      href={`/api/v1/invoices/${v.id}/file`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-primary hover:bg-primary-soft"
+                    >
+                      <Download className="h-3.5 w-3.5" /> İndir
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
         </div>
 
         <div className="space-y-4">
@@ -242,6 +303,12 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
                 <span>Toplam</span>
                 <span className="tabular">{formatTRY(o.total)}</span>
               </div>
+              {o.refundedTotal > 0 && (
+                <>
+                  <Line l="Kartınıza iade" v={`−${formatTRY(o.refundedTotal)}`} />
+                  <Line l="Net ödenen" v={formatTRY(o.total - o.refundedTotal)} />
+                </>
+              )}
               <div className="flex items-center justify-between pt-1">
                 <span className="text-fg-muted">{PAYMENT_TERM_LABEL[o.paymentTerm]}</span>
                 <PaymentBadge status={o.paymentStatus} />
@@ -258,7 +325,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               {o.waveCredit > 0 && (
                 <div className="flex items-center justify-between">
                   <span className="inline-flex items-center gap-1.5 text-fg-muted">
-                    <Gift className="h-4 w-4" /> Dalga kademe iadesi
+                    <Gift className="h-4 w-4" /> Dalga kademe farkı
                   </span>
                   <span className="font-semibold text-success tabular">+{formatTRY(o.waveCredit)}</span>
                 </div>
@@ -305,7 +372,7 @@ function IssueSheet({ orderId, item, onClose }: { orderId: string; item: OrderIt
             if (!item) return;
             try {
               await report.mutateAsync({ itemId: item.id, input: { type, qty, note: note.trim() || undefined, photo: photo ?? undefined } });
-              toast.success('Bildiriminiz alındı', { description: 'Operasyon ekibi inceledikten sonra iade kredinize geçer.' });
+              toast.success('Bildiriminiz alındı', { description: 'Operasyon ekibi inceler; onaylanırsa bedel kartınıza iade edilir (vadelide borcunuzdan düşülür).' });
               setNote('');
               setPhoto(null);
               onClose();
@@ -381,7 +448,7 @@ function IssueSheet({ orderId, item, onClose }: { orderId: string; item: OrderIt
               }}
             />
           </label>
-          <p className="text-xs text-fg-subtle">Onaylanan bildirimlerde etkilenen miktarın KDV dahil bedeli kredi bakiyenize eklenir.</p>
+          <p className="text-xs text-fg-subtle">Onaylanan bildirimlerde etkilenen miktarın KDV dahil bedeli kartınıza iade edilir; vadeli siparişte borcunuzdan düşülür. Bildirim teslimden sonraki 48 saat içinde yapılabilir.</p>
         </div>
       )}
     </Sheet>

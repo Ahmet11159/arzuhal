@@ -1,18 +1,18 @@
 import 'server-only';
 import { and, asc, eq, gt, inArray, ne, sql, sum } from 'drizzle-orm';
-import { nextTier, resolveTier, type OrderStatus, type WaveDTO } from '@havuz/core';
+import { nextTier, resolveTier, trFormat, trMonthKey, trMonthStart, type OrderStatus, type WaveDTO } from '@havuz/core';
 import type { Executor } from '../db/client';
 import * as s from '../db/schema';
 
 export const DAY = 86_400_000;
 export const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
-const monthFmt = new Intl.DateTimeFormat('tr-TR', { month: 'short' });
-export const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const monthFmt = trFormat({ month: 'short' });
+export const monthKey = trMonthKey;
 /** Son n ayın anahtarları ve kısa Türkçe etiketleri (eskiden yeniye). */
 export function lastMonths(n: number, now = new Date()) {
   return Array.from({ length: n }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (n - 1 - i), 1);
+    const d = trMonthStart(now, -(n - 1 - i));
     return { key: monthKey(d), label: monthFmt.format(d).replace('.', '') };
   });
 }

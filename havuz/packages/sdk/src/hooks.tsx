@@ -2,6 +2,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import type {
   ChangePasswordInput,
+  PayoutProfileInput,
   CreateCategoryInput,
   CreateOfferInput,
   CreateOrgInput,
@@ -68,6 +69,9 @@ export const qk = {
   adminPayouts: ['admin', 'payouts'] as const,
   adminAudit: (q: string, e: string) => ['admin', 'audit', q, e] as const,
   adminOutbox: ['admin', 'outbox'] as const,
+  payoutProfile: ['supplier', 'payout-profile'] as const,
+  adminPayoutProfile: (id: string) => ['admin', 'payout-profile', id] as const,
+  adminRefunds: ['admin', 'refunds'] as const,
 };
 
 type Opts<T> = Omit<UseQueryOptions<T>, 'queryKey' | 'queryFn'>;
@@ -424,5 +428,54 @@ export const useMarkSettlementPaid = () => {
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: MarkSettlementPaidInput }) => c.admin.markSettlementPaid(id, input),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin'] }),
+  });
+};
+
+export const usePayoutProfile = () => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.payoutProfile, queryFn: () => c.supplier.payoutProfile() });
+};
+export const useUpdatePayoutProfile = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (i: PayoutProfileInput) => c.supplier.updatePayoutProfile(i),
+    onSuccess: (d) => {
+      qc.setQueryData(qk.payoutProfile, d);
+      qc.invalidateQueries({ queryKey: ['supplier'] });
+      qc.invalidateQueries({ queryKey: qk.settings });
+    },
+  });
+};
+export const useAdminPayoutProfile = (id: string | null) => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.adminPayoutProfile(id ?? ''), queryFn: () => c.admin.supplierPayoutProfile(id!), enabled: !!id });
+};
+export const useUpdateAdminPayoutProfile = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: PayoutProfileInput }) => c.admin.updateSupplierPayoutProfile(id, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin'] }),
+  });
+};
+export const useSyncSupplier = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => c.admin.syncSupplier(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['admin'] }) });
+};
+export const useAdminRefunds = () => {
+  const c = useHavuz();
+  return useQuery({ queryKey: qk.adminRefunds, queryFn: async () => (await c.admin.refunds()).refunds });
+};
+export const useRefundAction = () => {
+  const c = useHavuz();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: { action: 'retry' } | { action: 'mark_done'; note: string } }) => c.admin.refundAction(id, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.adminRefunds });
+      qc.invalidateQueries({ queryKey: qk.payments });
+    },
   });
 };

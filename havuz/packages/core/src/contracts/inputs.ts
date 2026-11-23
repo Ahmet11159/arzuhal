@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { BUSINESS_TYPES, CATEGORY_ICONS, ISSUE_TYPES, ITEM_STATUSES, PAYMENT_PURPOSES, PAYMENT_TERMS } from '../domain/enums';
 import { luhnValid, passwordProblem } from '../domain/payment';
 import { normalizeIban } from '../domain/settlement';
+import { SUB_MERCHANT_TYPES } from '../domain/marketplace';
 
 /** İstemci ve sunucunun ortak kullandığı istek şemaları (tek doğruluk kaynağı). */
 
@@ -18,7 +19,8 @@ export const createOrderInput = z.object({
     .max(100),
   waveId: z.string().min(1).nullable().default(null),
   paymentTerm: z.enum(PAYMENT_TERMS).default('cash'),
-  useCredit: z.boolean().default(false),
+  /** Kullanım ve iptal-iade koşullarının onayı (sipariş başına kaydedilir). */
+  acceptTerms: z.literal(true, { errorMap: () => ({ message: 'Kullanım ve iptal-iade koşullarını onaylayın' }) }),
   note: z.string().trim().max(500).optional(),
 });
 export type CreateOrderInput = z.input<typeof createOrderInput>;
@@ -275,3 +277,23 @@ export type CreateSettlementsInput = { periodEnd: string | Date };
 
 export const markSettlementPaidInput = z.object({ reference: z.string().trim().min(3, 'Havale/EFT referansı girin').max(80) });
 export type MarkSettlementPaidInput = z.infer<typeof markSettlementPaidInput>;
+
+/** Tedarikçi ödeme (iyzico alt satıcı) bilgileri. Türüne göre zorunlu alanlar sunucuda da denetlenir. */
+export const payoutProfileInput = z.object({
+  subMerchantType: z.enum(SUB_MERCHANT_TYPES),
+  legalTitle: z.string().trim().max(200).optional().or(z.literal('')),
+  taxOffice: z.string().trim().max(100).optional().or(z.literal('')),
+  taxNo: z.string().trim().regex(/^\d{10}$/, 'Vergi no 10 haneli olmalı').optional().or(z.literal('')),
+  /** Boş bırakılırsa kayıtlı değer korunur. */
+  identityNumber: z.string().trim().regex(/^\d{11}$/, 'T.C. kimlik no 11 haneli olmalı').optional().or(z.literal('')),
+  contactName: z.string().trim().max(120).optional().or(z.literal('')),
+  address: z.string().trim().min(10, 'Açık adres en az 10 karakter olmalı').max(400),
+  iban: z
+    .string()
+    .trim()
+    .transform((v) => normalizeIban(v))
+    .refine((v): v is string => v !== null, 'Geçerli bir TR IBAN girin'),
+  email: z.string().trim().toLowerCase().email('Geçerli bir e-posta girin'),
+  phone: z.string().trim().min(10, 'Telefon numarası gerekli').max(20),
+});
+export type PayoutProfileInput = z.input<typeof payoutProfileInput>;

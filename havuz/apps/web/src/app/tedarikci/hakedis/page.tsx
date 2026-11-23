@@ -17,18 +17,27 @@ export default function SupplierPayoutsPage() {
   if (isLoading) return <PageSkeleton />;
   if (error || !data) return <ErrorState message={error?.message ?? 'Yüklenemedi'} onRetry={() => refetch()} />;
   const paid = data.settlements.filter((s) => s.status === 'paid').reduce((a, s) => a + s.netAmount, 0);
-  const waiting = data.settlements.filter((s) => s.status === 'pending').reduce((a, s) => a + s.netAmount, 0);
+  const profileOk = data.profile.complete && (!data.marketplace || data.profile.registered);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Hakedişler"
-        description="Teslim ettiğiniz her kalemin bedeli, Havuz komisyonu ve onaylı mal kabul iadeleri düşülerek dönemlik hakedişle hesabınıza ödenir. Üyenin ödemesi beklenmez; tahsilat riski Havuz’dadır."
+        description={
+          data.marketplace
+            ? 'Üye ödediği anda payınız ayrılır. Teslimden 48 saat sonra (sorun bildirimi yoksa) iyzico payınızı doğrudan hesabınıza aktarır; Havuz paranıza hiç dokunmaz. Hakediş belgesi bu ödemelerin ve komisyon faturasının dökümüdür.'
+            : 'Teslim ettiğiniz her kalemin bedeli; Havuz komisyonu (ve KDV’si) ile onaylı mal kabul iadeleri düşülerek dönemlik hakedişle hesabınıza ödenir.'
+        }
       />
-      {!data.iban && (
+      {!profileOk && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-warning/30 bg-warning-soft px-5 py-4 text-sm text-warning">
           <span className="inline-flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4" /> Hakediş ödemesi alabilmek için IBAN bilginizi girin.
+            <AlertTriangle className="h-4 w-4" />
+            {data.profile.error
+              ? `iyzico kaydınız tamamlanamadı: ${data.profile.error}`
+              : data.marketplace
+                ? 'Sipariş alabilmek ve ödeme alabilmek için ödeme bilgilerinizi tamamlayın.'
+                : 'Hakediş ödemesi alabilmek için ödeme bilgilerinizi tamamlayın.'}
           </span>
           <Link href="/tedarikci/ayarlar" className="font-semibold underline">
             Ayarlar
@@ -36,19 +45,20 @@ export default function SupplierPayoutsPage() {
         </div>
       )}
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatTile index={0} tone="primary" label="Sıradaki hakedişe girecek" value={data.pending.netAmount} format={formatTRY} icon={<Clock className="h-4 w-4" />} hint={`${data.pending.itemCount} teslim edilmiş kalem`} />
-        <StatTile index={1} tone="accent" label="Ödeme bekleyen hakediş" value={waiting} format={formatTRY} icon={<Banknote className="h-4 w-4" />} />
+        <StatTile index={0} tone="accent" label="Yoldaki ödemeler (tahmini)" value={data.awaiting.estimated} format={formatTRY} icon={<Clock className="h-4 w-4" />} hint={`${data.awaiting.itemCount} kalem: teslim, itiraz süresi veya üye ödemesi bekliyor`} />
+        <StatTile index={1} tone="primary" label="Onaylandı, belgeye girecek" value={data.pending.netAmount} format={formatTRY} icon={<Banknote className="h-4 w-4" />} hint={`${data.pending.itemCount} kalem${data.marketplace ? ' · iyzico öder' : ''}`} />
         <StatTile index={2} label="Bugüne kadar ödenen" value={paid} format={formatTRY} icon={<Landmark className="h-4 w-4" />} hint={data.iban ? formatIban(data.iban) : 'IBAN girilmedi'} />
       </div>
 
       <Card>
         <CardHeader title="Sıradaki hakediş nasıl hesaplanıyor?" />
-        <CardBody className="grid gap-3 sm:grid-cols-4">
+        <CardBody className="grid gap-3 sm:grid-cols-5">
           {[
-            { l: 'KDV dahil satış', v: formatTRY(data.pending.grossSales) },
-            { l: 'Komisyon (KDV hariç tutar üzerinden)', v: `−${formatTRY(data.pending.commission)}` },
+            { l: 'KDV dahil satış (+ vade farkı)', v: formatTRY(data.pending.grossSales) },
             { l: 'Onaylı mal kabul iadeleri', v: `−${formatTRY(data.pending.issueDeductions)}` },
-            { l: 'Net', v: formatTRY(data.pending.netAmount), strong: true },
+            { l: 'Komisyon (KDV hariç mal bedeli üzerinden)', v: `−${formatTRY(data.pending.commission)}` },
+            { l: 'Komisyon KDV’si (%20)', v: `−${formatTRY(data.pending.commissionVat)}` },
+            { l: 'Net payınız', v: formatTRY(data.pending.netAmount), strong: true },
           ].map((x) => (
             <div key={x.l} className={`rounded-2xl p-4 ${x.strong ? 'bg-primary-soft' : 'bg-muted/50'}`}>
               <div className="text-xs text-fg-muted">{x.l}</div>
@@ -75,7 +85,7 @@ export default function SupplierPayoutsPage() {
                       Dönem sonu {fmtDate(s.periodEnd)} · {s.itemCount} kalem{s.paidAt ? ` · ödendi ${fmtDate(s.paidAt)}` : ''}
                     </div>
                   </div>
-                  <Badge tone={s.status === 'paid' ? 'success' : 'warning'}>{SETTLEMENT_STATUS_LABEL[s.status]}</Badge>
+                  <Badge tone={s.status === 'paid' ? 'success' : 'warning'}>{s.channel === 'iyzico' ? 'iyzico öder' : SETTLEMENT_STATUS_LABEL[s.status]}</Badge>
                   <span className="w-32 text-right font-semibold tabular">{formatTRY(s.netAmount)}</span>
                   <ChevronRight className="h-4 w-4 text-fg-subtle transition group-hover:translate-x-0.5" />
                 </Link>

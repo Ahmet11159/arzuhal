@@ -2,7 +2,11 @@ import bcrypt from 'bcryptjs';
 import { inArray, sql } from 'drizzle-orm';
 import {
   closeWave,
+  computeCharges,
   computeOrderTotals,
+  FINANCING_BPS,
+  ISSUE_REPORT_WINDOW_HOURS,
+  vknValid,
   computeSettlement,
   formatSettlementNumber,
   dueDate,
@@ -13,6 +17,9 @@ import {
   type Plan,
   type PriceTier,
   type WaveLine,
+  nextTrWeekday,
+  trMonthStart,
+  trYear,
 } from '@havuz/core';
 import type { DB } from './client';
 import * as s from './schema';
@@ -181,6 +188,23 @@ function demoIban(rand: () => number): string {
   return `TR${String(98 - rem).padStart(2, '0')}${bban}`;
 }
 
+/** Geçerli kontrol haneli 10 haneli vergi no (VKN). */
+function demoVkn(rand: () => number): string {
+  const nine = String(100000000 + Math.floor(rand() * 899999999));
+  for (let d = 0; d <= 9; d++) if (vknValid(nine + d)) return nine + d;
+  return nine + '0';
+}
+
+/** Geçerli T.C. kimlik no (demo). */
+function demoTckn(rand: () => number): string {
+  const d = [1 + Math.floor(rand() * 9), ...Array.from({ length: 8 }, () => Math.floor(rand() * 10))];
+  const odd = d[0] + d[2] + d[4] + d[6] + d[8];
+  const even = d[1] + d[3] + d[5] + d[7];
+  d.push((((odd * 7 - even) % 10) + 10) % 10);
+  d.push(d.reduce((a, b) => a + b, 0) % 10);
+  return d.join('');
+}
+
 async function insertChunks<T extends object>(db: DB, table: Parameters<DB['insert']>[0], rows: T[], size = 400) {
   for (let i = 0; i < rows.length; i += size) {
     await db.insert(table).values(rows.slice(i, i + size) as never);
@@ -189,7 +213,7 @@ async function insertChunks<T extends object>(db: DB, table: Parameters<DB['inse
 
 export async function resetDatabase(db: DB) {
   await db.execute(
-    sql`TRUNCATE TABLE ${s.auditLogs}, ${s.outbox}, ${s.notifications}, ${s.passwordResets}, ${s.payments}, ${s.settlements}, ${s.issues}, ${s.ledgerEntries}, ${s.orderItems}, ${s.orders}, ${s.waves}, ${s.offers}, ${s.products}, ${s.categories}, ${s.subscriptions}, ${s.leads}, ${s.users}, ${s.organizations} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE ${s.auditLogs}, ${s.outbox}, ${s.notifications}, ${s.passwordResets}, ${s.refunds}, ${s.paymentItems}, ${s.invoices}, ${s.payments}, ${s.settlements}, ${s.issues}, ${s.ledgerEntries}, ${s.orderItems}, ${s.orders}, ${s.waves}, ${s.offers}, ${s.products}, ${s.categories}, ${s.subscriptions}, ${s.leads}, ${s.users}, ${s.organizations} RESTART IDENTITY CASCADE`,
   );
 }
 
@@ -219,9 +243,18 @@ export async function seed(db: DB, now: Date = new Date()) {
       name: sp.name,
       city: 'İstanbul',
       district: sp.district,
-      taxNo: String(1000000000 + Math.floor(rand() * 8999999999)).slice(0, 10),
+      taxNo: demoVkn(rand),
       commissionBps: sp.commissionBps,
       iban: demoIban(rand),
+      address: `${sp.district} Sanayi Sitesi ${1 + Math.floor(rand() * 40)}. Blok No:${1 + Math.floor(rand() * 90)}, ${sp.district}/İstanbul`,
+      // Pazaryeri alt satıcı bilgileri (test sağlayıcısında anahtar taklit edilir)
+      subMerchantType: sp.key === 'bereket' ? 'PRIVATE_COMPANY' : 'LIMITED_OR_JOINT_STOCK_COMPANY',
+      legalTitle: sp.key === 'bereket' ? `${sp.name} - Hasan Bereket` : `${sp.name} Ticaret Ltd. Şti.`,
+      taxOffice: `${sp.district} Vergi Dairesi`,
+      identityNumber: sp.key === 'bereket' ? demoTckn(rand) : null,
+      contactName: `${sp.name.split(' ')[0]} Yetkilisi`,
+      subMerchantKey: `test_sm_${id.slice(0, 8)}`,
+      subMerchantSyncedAt: new Date(t0 - 200 * DAY),
       email: sp.email ?? `satis@${slug(sp.name)}.demo`,
       phone: `0212 555 ${String(10 + Math.floor(rand() * 89))} ${String(10 + Math.floor(rand() * 89))}`,
       rating: sp.rating,
@@ -242,7 +275,8 @@ export async function seed(db: DB, now: Date = new Date()) {
       businessType: m.type,
       city: 'İstanbul',
       district: m.district,
-      taxNo: String(2000000000 + Math.floor(rand() * 7999999999)).slice(0, 10),
+      taxNo: demoVkn(rand),
+      address: `${m.district} Merkez Mah. Çarşı Sok. No:${1 + Math.floor(rand() * 120)}, ${m.district}/İstanbul`,
       plan: m.plan,
       creditLimit: L(m.creditLimit),
       email: m.email ?? `iletisim@${slug(m.name)}.demo`,
@@ -330,11 +364,8 @@ export async function seed(db: DB, now: Date = new Date()) {
   // --- Dalgalar ---
   const WEEKS = 24;
   const startCode = 41;
-  // Bir sonraki perşembe 18:00 (yerel) → açık dalganın kapanışı
-  const nextThu = new Date(now);
-  nextThu.setHours(18, 0, 0, 0);
-  const add = (4 - nextThu.getDay() + 7) % 7 || 7;
-  nextThu.setTime(nextThu.getTime() + add * DAY);
+  // Bir sonraki perşembe 18:00 (Türkiye saati) → açık dalganın kapanışı
+  const nextThu = nextTrWeekday(4, 18, now);
   if (nextThu.getTime() - t0 < 1.5 * DAY) nextThu.setTime(nextThu.getTime() + 7 * DAY);
 
   interface WaveRow {
@@ -550,7 +581,7 @@ export async function seed(db: DB, now: Date = new Date()) {
     }
     orderRows.push({
       id: d.id,
-      number: formatOrderNumber(i + 1, d.createdAt.getFullYear()),
+      number: formatOrderNumber(i + 1, trYear(d.createdAt)),
       memberId: memberIds[d.memberIdx],
       waveId: d.waveIdx === null ? null : waveRows[d.waveIdx].id,
       status,
@@ -561,10 +592,12 @@ export async function seed(db: DB, now: Date = new Date()) {
       subtotal: totals.subtotal,
       vat: totals.vat,
       financingFee: totals.financingFee,
+      financingBps: FINANCING_BPS[m.plan][d.term] ?? 0,
       creditApplied: 0,
       total: totals.total,
       marketTotal: totals.marketTotal,
-      waveCredit: creditByOrder[d.id] ?? 0,
+      waveCredit: 0,
+      termsAcceptedAt: d.createdAt,
       createdAt: d.createdAt,
       confirmedAt: minIdx >= 1 ? new Date(c + 3 * 3600_000) : null,
       shippedAt: minIdx >= 2 ? new Date(c + 26 * 3600_000) : null,
@@ -573,22 +606,9 @@ export async function seed(db: DB, now: Date = new Date()) {
     const deliveredAt = minIdx >= 3 ? new Date(c + (d.waveIdx === null ? 30 : 60) * 3600_000) : null;
     for (const it of d.items) it.deliveredAt = it.status === 'delivered' ? deliveredAt ?? new Date(c + 48 * 3600_000) : null;
     allItems.push(...d.items);
-    const credit = creditByOrder[d.id];
-    if (credit) {
-      ledger.push({
-        orgId: memberIds[d.memberIdx],
-        type: 'wave_rebate',
-        amount: credit,
-        description: `${waveRows[d.waveIdx!].title} kademe farkı`,
-        refId: d.id,
-        createdAt: waveRows[d.waveIdx!].cutoffAt,
-      });
-    }
   });
 
   await insertChunks(db, s.waves, waveRows);
-  await insertChunks(db, s.orders, orderRows);
-  await insertChunks(db, s.orderItems, allItems);
 
   // --- Mal kabul sorunları ---
   const delivered = allItems.filter((it) => it.status === 'delivered');
@@ -598,7 +618,8 @@ export async function seed(db: DB, now: Date = new Date()) {
   for (const it of delivered) {
     if (rand() > 0.025) continue;
     const order = orderById[it.orderId];
-    const recent = t0 - (order.createdAt as Date).getTime() < 10 * DAY;
+    // İtiraz süresi içindeki son teslimatlarda bildirim açık kalır (yönetim ekranında görülsün)
+    const recent = t0 - (it.deliveredAt as Date).getTime() < ISSUE_REPORT_WINDOW_HOURS * 3600_000;
     const qty = Math.max(1, Math.round(it.qty * between(0.1, 0.4)));
     const credit = Math.round(qty * it.finalUnitPrice * (1 + it.vatRate / 100));
     const resolved = !recent;
@@ -609,104 +630,225 @@ export async function seed(db: DB, now: Date = new Date()) {
       note: pick(['Kolide ezilme vardı', 'Eksik geldi', 'Tazelik beklenen seviyede değildi', 'Farklı ürün gönderildi', null]),
       status: resolved ? 'resolved' : 'open',
       creditAmount: resolved ? credit : 0,
-      createdAt: new Date((order.createdAt as Date).getTime() + 2 * DAY),
-      resolvedAt: resolved ? new Date((order.createdAt as Date).getTime() + 3 * DAY) : null,
+      createdAt: new Date((it.deliveredAt as Date).getTime() + 6 * 3600_000),
+      resolvedAt: resolved ? new Date((it.deliveredAt as Date).getTime() + 30 * 3600_000) : null,
     });
-    if (resolved) {
-      ledger.push({
-        orgId: order.memberId,
-        type: 'issue_credit',
-        amount: credit,
-        description: `${order.number} mal kabul iadesi`,
-        refId: order.id,
-        createdAt: new Date((order.createdAt as Date).getTime() + 3 * DAY),
+    void order;
+  }
+  const issueByItem = new Map(issueRows.map((i) => [i.orderItemId as string, i]));
+
+  // --- Tahsilat (ödeme kalemleri), karta iadeler, borç düşümleri ve serbest bırakma ---
+  // Peşin sipariş: sipariş anındaki fiyatlarla tahsil edilir; sonradan oluşan kademe farkı, iptal ve
+  // mal kabul iadeleri karta iade edilir. Vadeli sipariş: borç nihai tutara iner, vadesinde ödenir.
+  const supplierKey = Object.fromEntries(orgRows.filter((o) => o.type === 'supplier').map((o) => [o.id as string, o.subMerchantKey as string]));
+  const paymentRows: (typeof s.payments.$inferInsert)[] = [];
+  const paymentItemRows: (typeof s.paymentItems.$inferInsert)[] = [];
+  const refundRows: (typeof s.refunds.$inferInsert)[] = [];
+  const windowMs = ISSUE_REPORT_WINDOW_HOURS * 3600_000;
+  for (const o of orderRows) {
+    const items = allItems.filter((it) => it.orderId === o.id);
+    const bps = o.financingBps ?? 0;
+    const finalB = computeCharges(
+      items.map((it) => ({
+        id: it.id,
+        qty: it.qty,
+        finalUnitPrice: it.finalUnitPrice,
+        vatRate: it.vatRate,
+        commissionBps: it.commissionBps,
+        cancelled: it.status === 'cancelled',
+        issueCredit: issueByItem.get(it.id)?.status === 'resolved' ? (issueByItem.get(it.id)!.creditAmount ?? 0) : 0,
+      })),
+      bps,
+    );
+    const atOrder = computeCharges(items.map((it) => ({ id: it.id, qty: it.qty, finalUnitPrice: it.unitPrice, vatRate: it.vatRate, commissionBps: it.commissionBps })), bps);
+    const noIssue = computeCharges(items.map((it) => ({ id: it.id, qty: it.qty, finalUnitPrice: it.finalUnitPrice, vatRate: it.vatRate, commissionBps: it.commissionBps })), bps);
+    o.waveCredit = Math.max(0, atOrder.total - noIssue.total);
+    const label = o.waveId ? waveRows.find((w) => w.id === o.waveId)?.title ?? 'Dalga' : 'Sipariş';
+    const waveClosedAt = o.waveId ? waveRows.find((w) => w.id === o.waveId)?.cutoffAt ?? null : null;
+
+    if (o.paymentStatus !== 'paid') {
+      // Vadeli, henüz ödenmemiş: borç nihai tutardır; farklar borçtan düşülmüş olarak kaydedilir.
+      o.subtotal = finalB.subtotal;
+      o.vat = finalB.vat;
+      o.financingFee = finalB.financingFee;
+      o.total = finalB.total;
+      if (o.waveCredit > 0 && waveClosedAt) {
+        ledger.push({ orgId: o.memberId, type: 'wave_rebate', amount: o.waveCredit, description: `${o.number} · ${label} kademe farkı — borcunuzdan düşüldü`, refId: o.id, createdAt: waveClosedAt });
+      }
+      continue;
+    }
+
+    const cash = o.paymentTerm === 'cash';
+    const charged = cash ? atOrder : finalB;
+    if (!cash) {
+      o.subtotal = finalB.subtotal;
+      o.vat = finalB.vat;
+      o.financingFee = finalB.financingFee;
+      o.total = finalB.total;
+    }
+    const payId = crypto.randomUUID();
+    const paidAt = (o.paidAt as Date) ?? (o.createdAt as Date);
+    paymentRows.push({
+      id: payId,
+      orgId: o.memberId,
+      purpose: cash ? 'order' : 'due',
+      orderId: o.id,
+      amount: charged.total,
+      provider: 'test',
+      status: 'succeeded',
+      providerPaymentId: `test_${payId.slice(0, 8)}`,
+      cardLast4: '4242',
+      createdAt: new Date(paidAt.getTime() - 60_000),
+      completedAt: paidAt,
+    });
+    for (const line of charged.lines) {
+      if (line.charge <= 0) continue;
+      const it = items.find((x) => x.id === line.id)!;
+      const piId = crypto.randomUUID();
+      const fin = finalB.lines.find((l) => l.id === line.id)!;
+      const refund = Math.max(0, line.charge - fin.charge);
+      paymentItemRows.push({
+        id: piId,
+        paymentId: payId,
+        orderItemId: it.id,
+        supplierId: it.supplierId,
+        price: line.charge,
+        subMerchantKey: supplierKey[it.supplierId],
+        subMerchantPrice: line.supplierShare,
+        providerTxnId: `test_tx_${piId}`,
+        refundedAmount: refund,
       });
+      if (refund > 0) {
+        const iss = issueByItem.get(it.id);
+        const reason = it.status === 'cancelled' ? 'item_cancelled' : iss?.status === 'resolved' ? 'issue' : 'wave_rebate';
+        const at = reason === 'issue' ? (iss!.resolvedAt as Date) : reason === 'wave_rebate' ? (waveClosedAt ?? paidAt) : new Date(paidAt.getTime() + 3 * 3600_000);
+        refundRows.push({
+          paymentItemId: piId,
+          paymentId: payId,
+          orgId: o.memberId,
+          orderId: o.id,
+          orderItemId: it.id,
+          amount: refund,
+          reason,
+          description: `${o.number} · ${reason === 'wave_rebate' ? `${label} kademe farkı` : reason === 'issue' ? 'Mal kabul iadesi' : 'İptal edilen kalem'}`,
+          status: 'succeeded',
+          providerRefundId: `test_rf_${piId.slice(0, 8)}`,
+          attempts: 1,
+          createdAt: at,
+          processedAt: at,
+          completedAt: new Date(at.getTime() + 60_000),
+        });
+        ledger.push({
+          orgId: o.memberId,
+          type: reason === 'wave_rebate' ? 'wave_rebate' : reason === 'issue' ? 'issue_credit' : 'adjustment',
+          amount: refund,
+          description: `${o.number} · ${reason === 'wave_rebate' ? `${label} kademe farkı` : reason === 'issue' ? 'Mal kabul iadesi' : 'İptal edilen kalem'} — kartınıza iade`,
+          refId: o.id,
+          createdAt: at,
+        });
+      }
     }
   }
-  if (issueRows.length) await insertChunks(db, s.issues, issueRows);
 
-  // Bazı üyeler biriken kredilerini kullanmış olsun
-  const balance: Record<string, number> = {};
-  for (const e of ledger) balance[e.orgId] = (balance[e.orgId] ?? 0) + e.amount;
-  memberIds.forEach((id, i) => {
-    if (i % 3 === 1 && balance[id] > 0) {
-      ledger.push({
-        orgId: id,
-        type: 'credit_used',
-        amount: -Math.round(balance[id] * 0.6),
-        description: 'Siparişte kredi kullanımı',
-        createdAt: new Date(t0 - 12 * DAY),
-      });
+  // Serbest bırakma: teslim + itiraz süresi dolmuş, açık bildirimi olmayan, ödenmiş kalemler
+  const paidOrders = new Set(orderRows.filter((o) => o.paymentStatus === 'paid').map((o) => o.id as string));
+  const finalLine = new Map<string, ReturnType<typeof computeCharges>['lines'][number]>();
+  for (const o of orderRows) {
+    const items = allItems.filter((it) => it.orderId === o.id);
+    const b = computeCharges(
+      items.map((it) => ({
+        id: it.id,
+        qty: it.qty,
+        finalUnitPrice: it.finalUnitPrice,
+        vatRate: it.vatRate,
+        commissionBps: it.commissionBps,
+        cancelled: it.status === 'cancelled',
+        issueCredit: issueByItem.get(it.id)?.status === 'resolved' ? (issueByItem.get(it.id)!.creditAmount ?? 0) : 0,
+      })),
+      o.financingBps ?? 0,
+    );
+    for (const l of b.lines) finalLine.set(l.id, l);
+  }
+  for (const it of allItems as (ItemRow & typeof s.orderItems.$inferInsert)[]) {
+    if (it.status !== 'delivered' || !it.deliveredAt || !paidOrders.has(it.orderId)) continue;
+    if (t0 - it.deliveredAt.getTime() < windowMs || issueByItem.get(it.id)?.status === 'open') continue;
+    const l = finalLine.get(it.id)!;
+    const paidAt = orderById[it.orderId].paidAt as Date;
+    it.releasedAt = new Date(Math.max(it.deliveredAt.getTime() + windowMs, paidAt.getTime() + 3600_000));
+    if (it.releasedAt.getTime() > t0) {
+      it.releasedAt = undefined;
+      continue;
     }
-  });
-  await insertChunks(db, s.ledgerEntries, ledger);
+    it.chargeAmount = l.charge;
+    it.issueDeduction = l.issueCredit;
+    it.commissionAmount = l.commission;
+    it.commissionVat = l.commissionVat;
+    it.supplierShare = l.supplierShare;
+    for (const pi of paymentItemRows) if (pi.orderItemId === it.id) pi.approvedAt = it.releasedAt;
+  }
 
-  // --- Hakedişler: 14 günden eski teslimatlar aylık hakedişlerle ödenmiş olsun ---
-  const settleBefore = t0 - 14 * DAY;
-  const monthEnd = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
-  const groups = new Map<string, ItemRow[]>();
-  for (const it of allItems) {
-    if (it.status !== 'delivered' || !it.deliveredAt || it.deliveredAt.getTime() > settleBefore) continue;
-    const end = monthEnd(it.deliveredAt);
-    if (end.getTime() > settleBefore) continue; // içinde bulunulan ay henüz kapanmadı
+  await insertChunks(db, s.orders, orderRows);
+  await insertChunks(db, s.orderItems, allItems);
+  if (issueRows.length) await insertChunks(db, s.issues, issueRows);
+  await insertChunks(db, s.ledgerEntries, ledger);
+  if (paymentRows.length) await insertChunks(db, s.payments, paymentRows);
+  if (paymentItemRows.length) await insertChunks(db, s.paymentItems, paymentItemRows);
+  if (refundRows.length) await insertChunks(db, s.refunds, refundRows);
+
+  // --- Hakedişler: serbest bırakılmış ve ayı kapanmış kalemler aylık hakediş belgelerinde ---
+  const monthEnd = (d: Date) => new Date(trMonthStart(d, 1).getTime() - 1000);
+  const groups = new Map<string, (ItemRow & typeof s.orderItems.$inferInsert)[]>();
+  for (const it of allItems as (ItemRow & typeof s.orderItems.$inferInsert)[]) {
+    if (!it.releasedAt) continue;
+    const end = monthEnd(it.releasedAt);
+    if (end.getTime() > t0 - 3 * DAY) continue; // içinde bulunulan ay henüz kapanmadı
     const key = `${it.supplierId}|${end.toISOString()}`;
     (groups.get(key) ?? groups.set(key, []).get(key)!).push(it);
   }
-  const issueByItem = new Map(issueRows.filter((i) => i.status === 'resolved').map((i) => [i.orderItemId, i]));
   let settlementSeq = 0;
   const sortedKeys = [...groups.keys()].sort((a, b) => a.split('|')[1].localeCompare(b.split('|')[1]));
   for (const key of sortedKeys) {
     const items = groups.get(key)!;
     const [supplierId, endIso] = key.split('|');
     const periodEnd = new Date(endIso);
-    const issuesHere = items.map((it) => issueByItem.get(it.id)).filter(Boolean) as (typeof s.issues.$inferInsert)[];
-    const t = computeSettlement(items, issuesHere.map((i) => i.creditAmount ?? 0));
+    const t = computeSettlement(
+      items.map((it) => ({
+        charge: it.chargeAmount ?? 0,
+        issueDeduction: it.issueDeduction ?? 0,
+        commission: it.commissionAmount ?? 0,
+        commissionVat: it.commissionVat ?? 0,
+        supplierShare: it.supplierShare ?? 0,
+      })),
+    );
     const id = crypto.randomUUID();
-    const paidAt = new Date(periodEnd.getTime() + 5 * DAY);
     settlementSeq++;
     const sup = orgRows.find((o) => o.id === supplierId)!;
+    const createdAt = new Date(periodEnd.getTime() + 2 * DAY);
     await db.insert(s.settlements).values({
       id,
-      number: formatSettlementNumber(settlementSeq, periodEnd.getFullYear()),
+      number: formatSettlementNumber(settlementSeq, trYear(periodEnd)),
       supplierId,
       periodEnd,
       itemCount: t.itemCount,
       grossSales: t.grossSales,
       commission: t.commission,
+      commissionVat: t.commissionVat,
       issueDeductions: t.issueDeductions,
       netAmount: t.netAmount,
-      status: paidAt.getTime() < t0 ? 'paid' : 'pending',
-      reference: paidAt.getTime() < t0 ? `EFT${String(100000 + Math.floor(rand() * 899999))}` : null,
+      channel: 'iyzico',
+      status: 'paid',
+      reference: 'iyzico pazaryeri ödemesi',
       iban: sup.iban ?? null,
-      createdAt: new Date(periodEnd.getTime() + 2 * DAY),
-      paidAt: paidAt.getTime() < t0 ? paidAt : null,
+      createdAt,
+      paidAt: createdAt,
     });
     const ids = items.map((i) => i.id);
     for (let k = 0; k < ids.length; k += 300) {
       await db.update(s.orderItems).set({ settlementId: id }).where(inArray(s.orderItems.id, ids.slice(k, k + 300)));
     }
-    const issueIds = issuesHere.map((i) => i.orderItemId as string);
-    if (issueIds.length) await db.update(s.issues).set({ settlementId: id }).where(inArray(s.issues.orderItemId, issueIds));
   }
   // Kimlik sırası, elle verilen numaralarla çakışmasın
   await db.execute(sql`SELECT setval(pg_get_serial_sequence('settlements', 'seq'), ${settlementSeq + 1}, false)`);
-
-  // --- Kartla ödenen peşin siparişler için ödeme kayıtları (son 60 gün) ---
-  const paymentRows: (typeof s.payments.$inferInsert)[] = orderRows
-    .filter((o) => o.paymentTerm === 'cash' && (o.createdAt as Date).getTime() > t0 - 60 * DAY)
-    .map((o) => ({
-      orgId: o.memberId,
-      purpose: 'order' as const,
-      orderId: o.id,
-      amount: o.total,
-      provider: 'test',
-      status: 'succeeded' as const,
-      providerPaymentId: `test_${(o.id as string).slice(0, 8)}`,
-      cardLast4: '4242',
-      createdAt: o.createdAt,
-      completedAt: new Date((o.createdAt as Date).getTime() + 60_000),
-    }));
-  if (paymentRows.length) await insertChunks(db, s.payments, paymentRows);
 
   // --- Örnek bildirimler ---
   const lastClosed = waveRows.filter((w) => w.status !== 'open').at(-1);
@@ -715,9 +857,9 @@ export async function seed(db: DB, now: Date = new Date()) {
   await db.insert(s.notifications).values([
     { orgId: demoMember, type: 'wave.opened', title: `${waveRows.at(-1)!.title} açıldı`, body: 'Sipariş alımı perşembe 18:00’e kadar açık. Havuz büyüdükçe fiyatlar düşer.', link: '/uye/dalga', createdAt: waveRows.at(-1)!.opensAt },
     ...(lastClosed
-      ? [{ orgId: demoMember, type: 'wave.rebate', title: `${lastClosed.title} kapandı`, body: 'Havuz büyüdüğü için nihai fiyat düştü; fark kredi bakiyenize eklendi.', link: '/uye/hesap', createdAt: lastClosed.cutoffAt, readAt: lastClosed.cutoffAt }]
+      ? [{ orgId: demoMember, type: 'wave.rebate', title: `${lastClosed.title} kapandı`, body: 'Havuz büyüdüğü için nihai fiyat düştü; fark kartınıza iade edildi.', link: '/uye/hesap', createdAt: lastClosed.cutoffAt, readAt: lastClosed.cutoffAt }]
       : []),
-    { orgId: demoSupplier, type: 'settlement.paid', title: 'Hakediş ödendi', body: 'Geçen ayın hakedişi hesabınıza gönderildi.', link: '/tedarikci/hakedis', createdAt: new Date(t0 - 10 * DAY), readAt: new Date(t0 - 9 * DAY) },
+    { orgId: demoSupplier, type: 'settlement.created', title: 'Hakediş belgesi hazır', body: 'Geçen ayın teslimatları için payınız iyzico tarafından hesabınıza aktarıldı.', link: '/tedarikci/hakedis', createdAt: new Date(t0 - 10 * DAY), readAt: new Date(t0 - 9 * DAY) },
   ]);
 
   // --- Pro abonelik faturaları (son 6 ay) ---
@@ -725,7 +867,7 @@ export async function seed(db: DB, now: Date = new Date()) {
   MEMBERS.forEach((m, i) => {
     if (m.plan !== 'pro') return;
     for (let k = 0; k < 6; k++) {
-      const d = new Date(now.getFullYear(), now.getMonth() - k, 1);
+      const d = trMonthStart(now, -k);
       subs.push({ orgId: memberIds[i], amount: L(1490), periodStart: d, createdAt: d });
     }
   });

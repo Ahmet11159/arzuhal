@@ -6,6 +6,8 @@ export * from './domain/order';
 export * from './domain/revenue';
 export * from './domain/settlement';
 export * from './domain/payment';
+export * from './domain/time';
+export * from './domain/marketplace';
 export * from './domain/labels';
 export * from './contracts/inputs';
 export * from './contracts/dto';

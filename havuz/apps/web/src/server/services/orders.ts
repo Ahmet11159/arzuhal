@@ -7,8 +7,10 @@ import {
   deriveOrderStatus,
   dueDate,
   formatOrderNumber,
+  FINANCING_BPS,
   formatTRY,
   isTermAllowed,
+  ISSUE_REPORT_WINDOW_HOURS,
   ISSUE_TYPE_LABEL,
   PAYMENT_WINDOW_MINUTES,
   resolveTier,
@@ -17,19 +19,27 @@ import {
   type OrderStatus,
   type OrderSummaryDTO,
   type ReportIssueInput,
+  trYear,
 } from '@havuz/core';
 import type { z } from 'zod';
 import type { DB, Executor } from '../db/client';
 import * as s from '../db/schema';
 import { AppError, badRequest, forbidden, notFound } from '../http';
 import type { SessionPayload } from '../auth/secret';
-import { creditBalance, iso, outstanding, pooledForWave, STATUS_STEPS } from './common';
+import { iso, outstanding, pooledForWave, STATUS_STEPS } from './common';
+import { applyOrderChange, kickRefunds } from './money-flow';
+import { toRefundDTO } from './refunds';
+import { marketplaceEnabled } from '../payments';
 import { audit, SYSTEM, type Actor } from '../audit';
 import { notify, notifyOperators } from '../notify';
 
+type RefundRow = typeof s.refunds.$inferSelect & { org: { name: string }; order: { number: string } | null };
+type InvoiceRow = Omit<typeof s.invoices.$inferSelect, 'fileData'> & { supplier: typeof s.organizations.$inferSelect };
 type OrderRow = typeof s.orders.$inferSelect & {
   wave: typeof s.waves.$inferSelect | null;
   member?: typeof s.organizations.$inferSelect;
+  refunds?: RefundRow[];
+  invoices?: InvoiceRow[];
   items: (typeof s.orderItems.$inferSelect & {
     product: typeof s.products.$inferSelect & { category: typeof s.categories.$inferSelect };
     supplier: typeof s.organizations.$inferSelect;
@@ -41,6 +51,13 @@ const orderWith = {
   wave: true,
   member: true,
   items: { with: { product: { with: { category: true } }, supplier: true, issue: true } },
+} as const;
+
+/** Detay: iadeler ve faturalar da (fatura dosyası hariç; dosya ayrı uçtan indirilir). */
+const orderDetailWith = {
+  ...orderWith,
+  refunds: { with: { org: { columns: { name: true } }, order: { columns: { number: true } } }, orderBy: (r: typeof s.refunds, { desc }: { desc: (c: unknown) => unknown }) => [desc(r.createdAt)] },
+  invoices: { columns: { fileData: false }, with: { supplier: true } },
 } as const;
 
 export function toOrderSummary(o: OrderRow): OrderSummaryDTO {
@@ -103,12 +120,27 @@ export function toOrderDetail(o: OrderRow): OrderDetailDTO {
       issue: i.issue
         ? { id: i.issue.id, type: i.issue.type, status: i.issue.status, qty: i.issue.qty, note: i.issue.note, creditAmount: i.issue.creditAmount, photo: i.issue.photo }
         : null,
+      image: i.product.image,
+      issueDeadline:
+        i.status === 'delivered' && i.deliveredAt && !i.releasedAt ? new Date(i.deliveredAt.getTime() + ISSUE_REPORT_WINDOW_HOURS * 3600_000).toISOString() : null,
+    })),
+    refunds: (o.refunds ?? []).map(toRefundDTO),
+    refundedTotal: (o.refunds ?? []).reduce((a, r) => a + r.amount, 0),
+    invoices: (o.invoices ?? []).map((v) => ({
+      id: v.id,
+      supplier: { id: v.supplier.id, name: v.supplier.name },
+      number: v.number,
+      issuedAt: v.issuedAt.toISOString(),
+      amount: v.amount,
+      fileName: v.fileName,
+      mime: v.mime,
+      size: v.size,
     })),
   };
 }
 
 async function loadOrder(db: Executor, id: string) {
-  const o = await db.query.orders.findFirst({ where: eq(s.orders.id, id), with: orderWith });
+  const o = await db.query.orders.findFirst({ where: eq(s.orders.id, id), with: orderDetailWith as typeof orderWith });
   if (!o) throw notFound('Sipariş');
   return o as OrderRow;
 }
@@ -128,7 +160,10 @@ export async function getOrder(db: DB, session: SessionPayload, id: string): Pro
   if (session.role === 'member' && o.memberId !== session.org) throw notFound('Sipariş');
   if (session.role === 'supplier') {
     if (!o.items.some((i) => i.supplierId === session.org)) throw notFound('Sipariş');
-    o.items = o.items.filter((i) => i.supplierId === session.org);
+    const mine = new Set(o.items.filter((i) => i.supplierId === session.org).map((i) => i.id));
+    o.items = o.items.filter((i) => mine.has(i.id));
+    o.refunds = (o.refunds ?? []).filter((r) => r.orderItemId && mine.has(r.orderItemId));
+    o.invoices = (o.invoices ?? []).filter((v) => v.supplierId === session.org);
   }
   return toOrderDetail(o);
 }
@@ -157,7 +192,7 @@ export async function createOrder(db: DB, session: SessionPayload, raw: unknown,
     }
 
     // Üye satırı kilitlenir: aynı üyenin eşzamanlı siparişleri sıraya girer
-    // (kredi bakiyesi ve vadeli limit iki kez harcanamaz).
+    // (vadeli limit iki kez harcanamaz).
     const [member] = await tx.select().from(s.organizations).where(eq(s.organizations.id, session.org)).for('no key update');
     if (!member || member.type !== 'member') throw forbidden();
     if (!isTermAllowed(member.plan, input.paymentTerm)) {
@@ -176,6 +211,11 @@ export async function createOrder(db: DB, session: SessionPayload, raw: unknown,
       with: { product: true, supplier: true },
     });
     if (offerRows.length !== merged.size) throw badRequest('Sepetteki bazı ürünler artık mevcut değil');
+    // Pazaryerinde ödeme tedarikçi payı ayrılarak alınır: iyzico kaydı tamamlanmamış tedarikçi satış yapamaz.
+    if (marketplaceEnabled()) {
+      const missing = offerRows.find((o) => !o.supplier.subMerchantKey);
+      if (missing) throw badRequest(`${missing.supplier.name} şu an sipariş alamıyor (ödeme kaydı tamamlanmadı). Ürünü sepetten çıkarın veya başka tedarikçi seçin.`);
+    }
 
     const pooled = waveId ? await pooledForWave(tx, waveId, [...merged.keys()]) : {};
 
@@ -188,10 +228,9 @@ export async function createOrder(db: DB, session: SessionPayload, raw: unknown,
       return { o, qty, unitPrice };
     });
 
-    const balance = await creditBalance(tx, member.id);
     const totals = computeOrderTotals(
       lines.map((l) => ({ qty: l.qty, unitPrice: l.unitPrice, marketPrice: l.o.product.marketPrice, vatRate: l.o.product.vatRate })),
-      { plan: member.plan, term: input.paymentTerm, availableCredit: balance, useCredit: input.useCredit },
+      { plan: member.plan, term: input.paymentTerm },
     );
 
     if (input.paymentTerm !== 'cash') {
@@ -216,23 +255,24 @@ export async function createOrder(db: DB, session: SessionPayload, raw: unknown,
         waveId,
         status: 'pending',
         paymentTerm: input.paymentTerm,
-        // Peşin: kart ödemesi beklenir (kredi tamamını karşılıyorsa doğrudan ödenmiş sayılır).
+        // Peşin: kart ödemesi beklenir; vadeli: vade tarihinde ödenir.
         paymentStatus: totals.total === 0 ? 'paid' : input.paymentTerm === 'cash' ? 'unpaid' : 'due',
         dueAt: input.paymentTerm === 'cash' ? null : dueDate(now, input.paymentTerm),
         paidAt: totals.total === 0 ? now : null,
         subtotal: totals.subtotal,
         vat: totals.vat,
         financingFee: totals.financingFee,
-        creditApplied: totals.creditApplied,
+        financingBps: FINANCING_BPS[member.plan][input.paymentTerm] ?? 0,
         total: totals.total,
         marketTotal: totals.marketTotal,
         note: input.note ?? null,
+        termsAcceptedAt: now,
         createdAt: now,
       })
       .returning({ id: s.orders.id, seq: s.orders.seq });
     await tx
       .update(s.orders)
-      .set({ number: formatOrderNumber(order.seq, now.getFullYear()) })
+      .set({ number: formatOrderNumber(order.seq, trYear(now)) })
       .where(eq(s.orders.id, order.id));
 
     await tx.insert(s.orderItems).values(
@@ -259,16 +299,7 @@ export async function createOrder(db: DB, session: SessionPayload, raw: unknown,
       if (updated.length === 0) throw badRequest(`${l.o.product.name} için yeterli stok kalmadı`);
     }
 
-    if (totals.creditApplied > 0) {
-      await tx.insert(s.ledgerEntries).values({
-        orgId: member.id,
-        type: 'credit_used',
-        amount: -totals.creditApplied,
-        description: `${formatOrderNumber(order.seq, now.getFullYear())} siparişinde kullanıldı`,
-        refId: order.id,
-      });
-    }
-    const number = formatOrderNumber(order.seq, now.getFullYear());
+    const number = formatOrderNumber(order.seq, trYear(now));
     await audit(tx, { ...actor, userId: session.sub, orgId: member.id, name: member.name }, 'order.create', 'order', order.id, `${number} oluşturuldu (${formatTRY(totals.total)})`, {
       paymentTerm: input.paymentTerm,
       waveId,
@@ -302,6 +333,11 @@ export async function syncOrderStatus(tx: Executor, orderId: string) {
 }
 
 export async function updateItemStatus(db: DB, session: SessionPayload, itemId: string, to: ItemStatus) {
+  await updateItemStatusTx(db, session, itemId, to);
+  if (to === 'cancelled') kickRefunds(db);
+}
+
+async function updateItemStatusTx(db: DB, session: SessionPayload, itemId: string, to: ItemStatus) {
   await db.transaction(async (tx) => {
     const [item] = await tx.select().from(s.orderItems).where(eq(s.orderItems.id, itemId)).for('no key update');
     if (!item) throw notFound('Kalem');
@@ -313,15 +349,18 @@ export async function updateItemStatus(db: DB, session: SessionPayload, itemId: 
       .update(s.orderItems)
       .set({ status: to, updatedAt: new Date(), deliveredAt: to === 'delivered' ? new Date() : item.deliveredAt })
       .where(eq(s.orderItems.id, itemId));
+    let money: Awaited<ReturnType<typeof applyOrderChange>> | undefined;
+    await syncOrderStatus(tx, item.orderId);
     if (to === 'cancelled') {
       await tx
         .update(s.offers)
         .set({ stock: sql`${s.offers.stock} + ${item.qty}` })
         .where(eq(s.offers.id, item.offerId));
-      await refundCancelledItem(tx, item);
+      const [p] = await tx.select({ name: s.products.name }).from(s.products).where(eq(s.products.id, item.productId));
+      // Ödenmiş siparişte kalem bedeli karta iade edilir; ödenmemişte borçtan düşülür.
+      money = await applyOrderChange(tx, item.orderId, 'item_cancelled', `${p?.name ?? 'Ürün'} iptal edildi`);
     }
-    await syncOrderStatus(tx, item.orderId);
-    await notifyMemberOfItem(tx, item.orderId, item.productId, to);
+    await notifyMemberOfItem(tx, item.orderId, item.productId, to, money);
     await audit(tx, { userId: session.sub, orgId: session.org }, `item.${to}`, 'order_item', itemId, `Kalem durumu: ${item.status} → ${to}`, { orderId: item.orderId });
   });
 }
@@ -351,7 +390,7 @@ export async function notifySuppliersOfOrder(tx: Executor, orderId: string) {
   }
 }
 
-async function notifyMemberOfItem(tx: Executor, orderId: string, productId: string, to: ItemStatus) {
+async function notifyMemberOfItem(tx: Executor, orderId: string, productId: string, to: ItemStatus, money?: { mode: string; amount: number }) {
   const [o] = await tx.select({ memberId: s.orders.memberId, number: s.orders.number, status: s.orders.status }).from(s.orders).where(eq(s.orders.id, orderId));
   if (!o) return;
   const [p] = await tx.select({ name: s.products.name }).from(s.products).where(eq(s.products.id, productId));
@@ -361,7 +400,13 @@ async function notifyMemberOfItem(tx: Executor, orderId: string, productId: stri
   } else if (to === 'delivered' && o.status === 'delivered') {
     await notify(tx, { orgId: o.memberId, type: 'order.delivered', title: `${o.number} teslim edildi`, body: 'Ürünleri kontrol edin; sorun varsa sipariş sayfasından fotoğrafla bildirebilirsiniz.', link, dedupeKey: `order.delivered:${orderId}` });
   } else if (to === 'cancelled') {
-    await notify(tx, { orgId: o.memberId, type: 'order.item_cancelled', title: `${o.number}: bir kalem iptal edildi`, body: `${p?.name ?? 'Ürün'} tedarikçi tarafından iptal edildi; bedeli iade edildi.`, link, email: true });
+    const how =
+      money?.mode === 'refund'
+        ? `${formatTRY(money.amount)} kartınıza iade ediliyor.`
+        : money?.mode === 'reduced'
+          ? `Ödeyeceğiniz tutar ${formatTRY(money.amount)} azaldı.`
+          : 'Bu kalem için sizden ödeme alınmayacak.';
+    await notify(tx, { orgId: o.memberId, type: 'order.item_cancelled', title: `${o.number}: bir kalem iptal edildi`, body: `${p?.name ?? 'Ürün'} tedarikçi tarafından iptal edildi. ${how}`, link, email: true });
   }
 }
 
@@ -398,46 +443,9 @@ export async function cancelOwnUnpaidOrder(db: DB, session: SessionPayload, orde
     const [o] = await tx.select().from(s.orders).where(eq(s.orders.id, orderId)).for('no key update');
     if (!o || o.memberId !== session.org) throw notFound('Sipariş');
     if (o.paymentStatus !== 'unpaid' || o.status === 'cancelled') throw badRequest('Yalnızca ödemesi yapılmamış sipariş iptal edilebilir');
-    await cancelUnpaidOrder(tx, o, 'Siparişi siz iptal ettiniz; stok ve kullanılan kredi iade edildi.');
+    await cancelUnpaidOrder(tx, o, 'Siparişi siz iptal ettiniz; sizden ödeme alınmadı.');
     await audit(tx, { userId: session.sub, orgId: session.org }, 'order.cancel', 'order', o.id, `${o.number} üye tarafından iptal edildi`);
   });
-}
-
-/**
- * İptal edilen kalemin bedeli üyeye geri verilir:
- *  - ödenmiş siparişte → KDV dahil tutar kredi defterine iade,
- *  - vadesi bekleyen siparişte → borç (ve orantılı vade farkı) düşülür.
- */
-async function refundCancelledItem(tx: Executor, item: typeof s.orderItems.$inferSelect) {
-  const [order] = await tx.select().from(s.orders).where(eq(s.orders.id, item.orderId)).for('no key update');
-  if (!order) return;
-  const net = item.qty * item.finalUnitPrice;
-  const vat = Math.round((net * item.vatRate) / 100);
-  const gross = net + vat;
-  if (order.paymentStatus === 'paid') {
-    await tx.insert(s.ledgerEntries).values({
-      orgId: order.memberId,
-      type: 'adjustment',
-      amount: gross,
-      description: `${order.number} iptal edilen kalem iadesi`,
-      refId: order.id,
-    });
-    return;
-  }
-  const base = order.subtotal + order.vat;
-  const feeShare = base > 0 ? Math.round((order.financingFee * gross) / base) : 0;
-  const total = Math.max(0, order.total - gross - feeShare);
-  await tx
-    .update(s.orders)
-    .set({
-      subtotal: Math.max(0, order.subtotal - net),
-      vat: Math.max(0, order.vat - vat),
-      financingFee: Math.max(0, order.financingFee - feeShare),
-      total,
-      paymentStatus: total === 0 ? 'paid' : order.paymentStatus,
-      paidAt: total === 0 ? new Date() : order.paidAt,
-    })
-    .where(eq(s.orders.id, order.id));
 }
 
 /** Üye "teslim aldım" der: yoldaki tüm kalemler teslim edilmiş sayılır. */
@@ -463,6 +471,9 @@ export async function reportIssue(db: DB, session: SessionPayload, orderId: stri
   });
   if (!item || item.order.memberId !== session.org) throw notFound('Kalem');
   if (item.status !== 'delivered') throw badRequest('Sorun bildirimi yalnızca teslim edilen ürünler için yapılabilir');
+  if (item.releasedAt || (item.deliveredAt && Date.now() - item.deliveredAt.getTime() > ISSUE_REPORT_WINDOW_HOURS * 3600_000)) {
+    throw badRequest(`Sorun bildirimi teslimden sonraki ${ISSUE_REPORT_WINDOW_HOURS} saat içinde yapılabilir`);
+  }
   if (item.issue) throw badRequest('Bu ürün için zaten bir bildirim var');
   if (input.qty > item.qty) throw badRequest(`En fazla ${item.qty} adet bildirebilirsiniz`);
   await db.transaction(async (tx) => {
@@ -481,7 +492,7 @@ export async function reportIssue(db: DB, session: SessionPayload, orderId: stri
       orgId: item.supplierId,
       type: 'issue.new',
       title: `Ürününüz için mal kabul bildirimi`,
-      body: `${item.order.number} · ${p?.name ?? 'Ürün'} · ${ISSUE_TYPE_LABEL[input.type]} (${input.qty} adet). Onaylanırsa hakedişten düşülür.`,
+      body: `${item.order.number} · ${p?.name ?? 'Ürün'} · ${ISSUE_TYPE_LABEL[input.type]} (${input.qty} adet). Onaylanırsa bu kalemin bedelinden düşülür; inceleme bitene kadar kalemin ödemesi bekletilir.`,
       link: '/tedarikci/siparisler',
     });
     await audit(tx, { userId: session.sub, orgId: session.org }, 'issue.create', 'issue', iss.id, `${item.order.number} için ${ISSUE_TYPE_LABEL[input.type]} bildirimi`);

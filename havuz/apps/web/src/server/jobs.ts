@@ -1,10 +1,11 @@
 import 'server-only';
 import { and, eq, gt, lt, lte, notExists } from 'drizzle-orm';
-import { formatTRY } from '@havuz/core';
+import { formatTRY, trFormat } from '@havuz/core';
 import type { DB } from './db/client';
 import * as s from './db/schema';
 import { closeWave } from './services/waves';
 import { expireUnpaidOrders } from './services/payments';
+import { processRefunds, processReleases } from './services/money-flow';
 import { flushOutbox } from './channels';
 import { notify } from './notify';
 import { SYSTEM } from './audit';
@@ -18,7 +19,9 @@ const DAY = 86_400_000;
  *  3. Teslim tarihi geçen kapalı dalgaları "teslim edildi" yapar.
  *  4. Vadesi geçen ödemeleri "gecikmiş" olarak işaretler ve üyeye bildirir.
  *  5. Hatırlatmalar: vadesi 3 gün içinde dolacak borçlar, 24 saat içinde kapanacak dalga.
- *  6. E-posta / WhatsApp kuyruğunu gönderir.
+ *  6. Bekleyen karta iadeleri sağlayıcıya gönderir (başarısızları artan aralıklarla yeniden dener).
+ *  7. Teslim + itiraz süresi dolan kalemleri serbest bırakır (pazaryerinde iyzico ürün onayı).
+ *  8. E-posta / WhatsApp kuyruğunu gönderir.
  */
 export async function runMaintenance(db: DB, now: Date = new Date()) {
   const expiredOrders = await expireUnpaidOrders(db, now);
@@ -75,7 +78,7 @@ export async function runMaintenance(db: DB, now: Date = new Date()) {
           orgId: o.memberId,
           type: 'payment.due_soon',
           title: `Vade yaklaşıyor: ${o.number}`,
-          body: `${formatTRY(o.total)} ödemenin vadesi ${new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long' }).format(o.dueAt!)}.`,
+          body: `${formatTRY(o.total)} ödemenin vadesi ${trFormat({ day: 'numeric', month: 'long' }).format(o.dueAt!)}.`,
           link: '/uye/hesap',
           dedupeKey: `payment.due_soon:${o.id}`,
           email: true,
@@ -116,8 +119,10 @@ export async function runMaintenance(db: DB, now: Date = new Date()) {
     }
   });
 
+  const refunds = await processRefunds(db, now);
+  const releases = await processReleases(db, now);
   const outbox = await flushOutbox(db);
-  return { expiredOrders, closedWaves: closed, deliveredWaves: delivered.length, overdueOrders: overdue.length, reminders, outbox };
+  return { expiredOrders, closedWaves: closed, deliveredWaves: delivered.length, overdueOrders: overdue.length, reminders, refunds, releases, outbox };
 }
 
 const g = globalThis as unknown as { __havuzScheduler?: ReturnType<typeof setInterval> };
@@ -128,7 +133,8 @@ export function startScheduler(db: DB) {
   const tick = () =>
     runMaintenance(db)
       .then((r) => {
-        if (r.closedWaves.length || r.overdueOrders || r.expiredOrders || r.outbox.failed) console.info('[havuz:bakım]', JSON.stringify(r));
+        if (r.closedWaves.length || r.overdueOrders || r.expiredOrders || r.outbox.failed || r.refunds.succeeded || r.refunds.failed || r.releases.released)
+          console.info('[havuz:bakım]', JSON.stringify(r));
       })
       .catch((e) => console.error('[havuz:bakım] hata', e));
   void tick();

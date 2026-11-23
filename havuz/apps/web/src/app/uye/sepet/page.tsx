@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { toast } from 'sonner';
-import { ArrowLeft, CheckCircle2, CreditCard, Info, PiggyBank, ShoppingCart, Trash2, Truck, Waves, Zap } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, CreditCard, Info, ShoppingCart, Trash2, Truck, Waves, Zap } from 'lucide-react';
 import {
   computeOrderTotals,
   FINANCING_BPS,
@@ -19,7 +19,7 @@ import {
   type PaymentTerm,
   type ProductDTO,
 } from '@havuz/core';
-import { ApiError, useAccount, useCreateOrder, useMe, useProducts, useWaves } from '@havuz/sdk';
+import { ApiError, useCreateOrder, useMe, useProducts, useWaves } from '@havuz/sdk';
 import { PageHeader } from '@/components/app/page-header';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -45,16 +45,14 @@ export default function CartPage() {
   const { lines, mode, setMode, setQty, remove, clear } = useCart();
   const products = useProducts({});
   const me = useMe();
-  const account = useAccount();
   const create = useCreateOrder();
   const [term, setTerm] = useState<PaymentTerm>('cash');
-  const [useCredit, setUseCredit] = useState(true);
+  const [accepted, setAccepted] = useState(false);
   const [note, setNote] = useState('');
   const [done, setDone] = useState<{ id: string; number: string; paying: boolean } | null>(null);
   const payment = usePay();
 
   const plan = me.data?.user.org.plan ?? 'free';
-  const credit = account.data?.creditBalance ?? 0;
   const waves = useWaves();
   const activeWave = useMemo(
     () => (waves.data ? pickActiveWave(waves.data.waves) : null),
@@ -93,19 +91,23 @@ export default function CartPage() {
     if (!resolved.lines.length || !isTermAllowed(plan, term)) return null;
     return computeOrderTotals(
       resolved.lines.map((l) => ({ qty: l.qty, unitPrice: l.unitPrice, marketPrice: l.product.marketPrice, vatRate: l.product.vatRate })),
-      { plan, term, availableCredit: credit, useCredit },
+      { plan, term },
     );
-  }, [resolved.lines, plan, term, credit, useCredit]);
+  }, [resolved.lines, plan, term]);
 
   async function placeOrder() {
     if (!resolved.lines.length) return;
+    if (!accepted) {
+      toast.error('Devam etmek için kullanım ve iptal-iade koşullarını onaylayın');
+      return;
+    }
     const wId = mode === 'wave' ? activeWave?.id ?? null : null;
     try {
       const r = await create.mutateAsync({
         items: resolved.lines.map((l) => ({ offerId: l.offer.id, qty: l.qty })),
         waveId: wId,
         paymentTerm: term,
-        useCredit,
+        acceptTerms: true,
         note: note.trim() || undefined,
       });
       clear();
@@ -264,15 +266,6 @@ export default function CartPage() {
                     </label>
                   );
                 })}
-                {credit > 0 && (
-                  <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl bg-accent-soft/60 p-3">
-                    <span className="flex items-center gap-2 text-sm">
-                      <PiggyBank className="h-4 w-4 text-warning" />
-                      Kredimi kullan <b className="tabular">{formatTRY(credit)}</b>
-                    </span>
-                    <input type="checkbox" checked={useCredit} onChange={(e) => setUseCredit(e.target.checked)} className="h-4 w-4 accent-[rgb(var(--primary))]" />
-                  </label>
-                )}
                 <textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
@@ -290,7 +283,6 @@ export default function CartPage() {
                   <Row label="Ara toplam" value={formatTRY(totals.subtotal)} />
                   <Row label="KDV" value={formatTRY(totals.vat)} />
                   {totals.financingFee > 0 && <Row label="Vade farkı" value={formatTRY(totals.financingFee)} />}
-                  {totals.creditApplied > 0 && <Row label="Kullanılan kredi" value={`−${formatTRY(totals.creditApplied)}`} tone="success" />}
                   <div className="flex items-baseline justify-between border-t border-border pt-3">
                     <span className="font-semibold">Toplam</span>
                     <motion.span key={totals.total} initial={{ scale: 1.08 }} animate={{ scale: 1 }} className="text-2xl font-semibold tracking-tight tabular">
@@ -301,6 +293,13 @@ export default function CartPage() {
                     <Info className="h-4 w-4 shrink-0" />
                     Piyasa fiyatına göre <b className="tabular">{formatTRY(totals.savings)}</b> tasarruf
                   </div>
+                  <label className="mt-1 flex cursor-pointer items-start gap-2.5 rounded-xl border border-border p-3 text-[13px] leading-snug">
+                    <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-[rgb(var(--primary))]" />
+                    <span className="text-fg-muted">
+                      <Link href="/kullanim-kosullari" target="_blank" className="font-medium text-fg underline underline-offset-2">Kullanım koşullarını</Link> ve{' '}
+                      <Link href="/iptal-iade" target="_blank" className="font-medium text-fg underline underline-offset-2">iptal-iade koşullarını</Link> okudum, kabul ediyorum.
+                    </span>
+                  </label>
                   <Button size="lg" className="mt-2 w-full" onClick={placeOrder} loading={create.isPending || payment.pending} disabled={!resolved.lines.length}>
                     {term === 'cash' && totals.total > 0 ? 'Siparişi onayla ve öde' : mode === 'wave' && activeWave ? 'Dalgaya katıl ve sipariş ver' : 'Siparişi onayla'}
                   </Button>

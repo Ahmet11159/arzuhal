@@ -1,46 +1,44 @@
-import { applyBps, type Kurus } from '../money';
+import type { Kurus } from '../money';
 
 /**
- * Tedarikçi hakedişi.
+ * Tedarikçi hakedişi (dönemsel mutabakat).
  *
- * Havuz, üyeden KDV dahil tutarı tahsil eder (veya vadeli olarak alacaklanır) ve
- * tedarikçiye teslim edilen her kalem için ödeme yapmayı garanti eder:
+ * Pazaryeri modelinde tedarikçinin payı ödeme anında ayrılır ve iyzico tarafından doğrudan
+ * tedarikçiye ödenir; hakediş belgesi bu ödemelerin ve Havuz komisyon faturasının dökümüdür.
+ * Her kalem, teslim + itiraz süresi sonunda "serbest bırakılırken" nihai tutarlarıyla dondurulur
+ * (bkz. computeCharges); hakediş bu dondurulmuş tutarları toplar.
  *
- *   net = KDV dahil satış − komisyon (KDV hariç tutar üzerinden) − onaylı mal kabul iadeleri
- *
- * Üyenin ödemesi beklenmez: tahsilat riski Havuz'dadır.
+ *   net = KDV dahil satış (+ vade farkı) − mal kabul iadeleri − komisyon − komisyon KDV'si
  */
 export interface SettlementLine {
-  qty: number;
-  finalUnitPrice: Kurus;
-  vatRate: number;
-  commissionBps: number;
+  /** Üyenin ödediği (iade sonrası) kalem tutarı */
+  charge: Kurus;
+  issueDeduction: Kurus;
+  commission: Kurus;
+  commissionVat: Kurus;
+  supplierShare: Kurus;
 }
 
 export interface SettlementTotals {
   itemCount: number;
+  /** İade öncesi satış (KDV ve vade farkı dahil) */
   grossSales: Kurus;
   commission: Kurus;
+  commissionVat: Kurus;
   issueDeductions: Kurus;
   netAmount: Kurus;
 }
 
-export function computeSettlement(lines: SettlementLine[], issueCredits: Kurus[] = []): SettlementTotals {
-  let grossSales = 0;
-  let commission = 0;
+export function computeSettlement(lines: SettlementLine[]): SettlementTotals {
+  const t = { itemCount: lines.length, grossSales: 0, commission: 0, commissionVat: 0, issueDeductions: 0, netAmount: 0 };
   for (const l of lines) {
-    const net = l.qty * l.finalUnitPrice;
-    grossSales += net + Math.round((net * l.vatRate) / 100);
-    commission += applyBps(net, l.commissionBps);
+    t.grossSales += l.charge + l.issueDeduction;
+    t.issueDeductions += l.issueDeduction;
+    t.commission += l.commission;
+    t.commissionVat += l.commissionVat;
+    t.netAmount += l.supplierShare;
   }
-  const issueDeductions = issueCredits.reduce((a, b) => a + b, 0);
-  return {
-    itemCount: lines.length,
-    grossSales,
-    commission,
-    issueDeductions,
-    netAmount: grossSales - commission - issueDeductions,
-  };
+  return t;
 }
 
 export function formatSettlementNumber(seq: number, year: number): string {

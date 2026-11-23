@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { ArrowRight, Crown, PiggyBank, ReceiptText, ShoppingBag, TrendingDown, Wallet } from 'lucide-react';
-import { formatPercent, formatTRY, formatTRYWhole } from '@havuz/core';
+import { formatPercent, formatTRY, formatTRYWhole, trParts } from '@havuz/core';
 import { useMemberDashboard } from '@havuz/sdk';
 import { PageHeader } from '@/components/app/page-header';
 import { WaveBanner } from '@/components/app/wave-banner';
@@ -16,9 +16,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PageSkeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/empty';
+import { fmtLongDate } from '@/lib/format';
 
 function greeting() {
-  const h = new Date().getHours();
+  const h = trParts().hour;
   return h < 12 ? 'Günaydın' : h < 18 ? 'İyi günler' : 'İyi akşamlar';
 }
 
@@ -31,7 +32,7 @@ export default function MemberDashboard() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}
+        eyebrow={fmtLongDate(new Date())}
         title={`${greeting()}, ${data.org.name}`}
         description="Bu ayki tedarik harcamanız, tasarrufunuz ve açık dalga tek bakışta."
         action={
@@ -56,7 +57,7 @@ export default function MemberDashboard() {
           icon={<TrendingDown className="h-4 w-4" />}
           hint={<span>Piyasa fiyatına göre <b className="text-success">{formatPercent(k.savingRate)}</b> daha ucuz</span>}
         />
-        <StatTile index={2} tone="accent" label="Kredi bakiyesi" value={k.creditBalance} format={formatTRY} icon={<PiggyBank className="h-4 w-4" />} hint="Dalga iadeleri ve mal kabul kredileri" />
+        <StatTile index={2} tone="accent" label="Size dönen" value={k.returnedTotal} format={formatTRY} icon={<PiggyBank className="h-4 w-4" />} hint="Dalga farkı ve iadeler: karta iade veya borçtan düşüm" />
         <StatTile
           index={3}
           label="Açık vadeli bakiye"

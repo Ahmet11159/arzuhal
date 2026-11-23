@@ -1,5 +1,6 @@
 import type { Kurus } from '../money';
 import type { PriceTier } from '../domain/pricing';
+import type { RefundReason, RefundStatus, SubMerchantType } from '../domain/marketplace';
 import type {
   LeadStatus,
   PaymentPurpose,
@@ -138,6 +139,36 @@ export interface OrderItemDTO {
   vatRate: number;
   status: ItemStatus;
   issue: { id: string; type: IssueType; status: IssueStatus; qty: number; note: string | null; creditAmount: Kurus; photo: string | null } | null;
+  /** Ürün fotoğrafı (varsa) */
+  image: string | null;
+  /** Teslim edildiyse sorun bildiriminin son anı */
+  issueDeadline: ISODate | null;
+}
+
+export interface RefundDTO {
+  id: string;
+  orgName: string;
+  orderId: string | null;
+  orderNumber: string | null;
+  amount: Kurus;
+  reason: RefundReason;
+  status: RefundStatus;
+  description: string;
+  error: string | null;
+  attempts: number;
+  createdAt: ISODate;
+  completedAt: ISODate | null;
+}
+
+export interface OrderInvoiceDTO {
+  id: string;
+  supplier: { id: string; name: string };
+  number: string;
+  issuedAt: ISODate;
+  amount: Kurus;
+  fileName: string;
+  mime: string;
+  size: number;
 }
 
 export interface OrderSummaryDTO {
@@ -168,6 +199,11 @@ export interface OrderDetailDTO extends OrderSummaryDTO {
   marketTotal: Kurus;
   note: string | null;
   timeline: { status: OrderStatus; at: ISODate | null; done: boolean }[];
+  /** Karta iadeler (iptal, dalga farkı, mal kabul) */
+  refunds: RefundDTO[];
+  refundedTotal: Kurus;
+  /** Tedarikçilerin yüklediği faturalar */
+  invoices: OrderInvoiceDTO[];
 }
 
 export interface CreateOrderResult {
@@ -186,7 +222,8 @@ export interface MemberDashboardDTO {
     monthSavings: Kurus;
     savingRate: number;
     lifetimeSavings: Kurus;
-    creditBalance: Kurus;
+    /** Dalga farkı, iptal ve mal kabul iadeleriyle üyeye dönen toplam (karta iade + borçtan düşüm) */
+    returnedTotal: Kurus;
     outstanding: Kurus;
     activeOrders: number;
   };
@@ -216,9 +253,11 @@ export interface AccountDTO {
     taxNo: string | null;
     creditLimit: Kurus;
   };
-  creditBalance: Kurus;
+  /** Üyeye dönen toplam (hesap hareketlerinin toplamı) */
+  returnedTotal: Kurus;
   outstanding: Kurus;
   ledger: LedgerEntryDTO[];
+  refunds: RefundDTO[];
   dueOrders: OrderSummaryDTO[];
   invoices: { key: string; month: string; orderCount: number; total: Kurus; vat: Kurus }[];
 }
@@ -236,6 +275,10 @@ export interface SupplierOrderItemDTO {
   status: ItemStatus;
   createdAt: ISODate;
   wave: { code: string; deliveryAt: ISODate } | null;
+  /** Tedarikçi ödemesinin durumu */
+  payoutStatus: 'awaiting_payment' | 'in_progress' | 'objection_period' | 'released' | 'settled' | 'cancelled';
+  /** Bu sipariş için fatura yüklendi mi */
+  invoiceUploaded: boolean;
 }
 
 export interface SupplierOfferDTO {
@@ -319,6 +362,35 @@ export interface AdminSupplierDTO {
   phone: string | null;
   district: string | null;
   pendingPayout: Kurus;
+  payout: PayoutProfileStatusDTO;
+}
+
+export interface PayoutProfileStatusDTO {
+  type: SubMerchantType | null;
+  /** Bilgiler eksiksiz mi */
+  complete: boolean;
+  problems: string[];
+  /** iyzico alt satıcı kaydı var mı */
+  registered: boolean;
+  error: string | null;
+  syncedAt: ISODate | null;
+}
+
+export interface PayoutProfileDTO {
+  subMerchantType: SubMerchantType | null;
+  legalTitle: string | null;
+  taxOffice: string | null;
+  taxNo: string | null;
+  /** Maskelenmiş (ör. 10*******46) */
+  identityNumberMasked: string | null;
+  contactName: string | null;
+  address: string | null;
+  iban: string | null;
+  email: string | null;
+  phone: string | null;
+  status: PayoutProfileStatusDTO;
+  /** Pazaryeri açık mı (kayıt zorunlu) */
+  marketplace: boolean;
 }
 
 export interface AdminIssueDTO {
@@ -387,6 +459,7 @@ export interface PaymentDTO {
   errorMessage: string | null;
   createdAt: ISODate;
   completedAt: ISODate | null;
+  refundedAmount: Kurus;
 }
 
 export interface TestPaymentPageDTO {
@@ -408,8 +481,11 @@ export interface SettlementDTO {
   itemCount: number;
   grossSales: Kurus;
   commission: Kurus;
+  commissionVat: Kurus;
   issueDeductions: Kurus;
   netAmount: Kurus;
+  /** iyzico: tedarikçiye iyzico öder (pazaryeri); manual: Havuz havale eder */
+  channel: 'iyzico' | 'manual';
   status: SettlementStatus;
   reference: string | null;
   iban: string | null;
@@ -428,16 +504,25 @@ export interface SettlementDetailDTO extends SettlementDTO {
     finalUnitPrice: Kurus;
     vatRate: number;
     deliveredAt: ISODate | null;
+    /** İade öncesi KDV dahil tutar (+ vade farkı payı) */
     gross: Kurus;
+    issueDeduction: Kurus;
     commission: Kurus;
+    commissionVat: Kurus;
+    payout: Kurus;
   }[];
   issues: { id: string; orderNumber: string; productName: string; creditAmount: Kurus }[];
 }
 
 export interface PayoutOverviewDTO {
   /** Teslim edilmiş, henüz hakedişe girmemiş tutarlar. */
-  pending: { itemCount: number; grossSales: Kurus; commission: Kurus; issueDeductions: Kurus; netAmount: Kurus };
+  /** Onaylanmış (serbest bırakılmış), henüz hakediş belgesine girmemiş tutarlar. */
+  pending: { itemCount: number; grossSales: Kurus; commission: Kurus; commissionVat: Kurus; issueDeductions: Kurus; netAmount: Kurus };
+  /** Teslim/itiraz süresi/üye ödemesi bekleyen kalemler (tahmini) */
+  awaiting: { itemCount: number; estimated: Kurus };
   iban: string | null;
+  marketplace: boolean;
+  profile: PayoutProfileStatusDTO;
   settlements: SettlementDTO[];
 }
 
@@ -536,9 +621,11 @@ export interface StatementDTO {
     financingFee: Kurus;
     creditApplied: Kurus;
     total: Kurus;
+    /** Karta iade edilen */
+    refunded: Kurus;
   }[];
   vatByRate: { rate: number; base: Kurus; vat: Kurus }[];
-  totals: { subtotal: Kurus; vat: Kurus; financingFee: Kurus; creditApplied: Kurus; total: Kurus; waveCredits: Kurus };
+  totals: { subtotal: Kurus; vat: Kurus; financingFee: Kurus; creditApplied: Kurus; total: Kurus; waveCredits: Kurus; refunded: Kurus };
 }
 
 export interface HealthDTO {

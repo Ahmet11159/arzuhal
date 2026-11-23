@@ -1,4 +1,7 @@
 import type {
+  PayoutProfileDTO,
+  PayoutProfileInput,
+  RefundDTO,
   AdminPayoutRowDTO,
   AdminProductDTO,
   AuditLogDTO,
@@ -81,7 +84,7 @@ export interface HavuzClientOptions {
   onUnauthorized?: () => void;
 }
 
-type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 /**
  * Platformdan bağımsız, tip güvenli REST istemcisi.
@@ -184,6 +187,8 @@ export function createHavuzClient(opts: HavuzClientOptions) {
       updateOffer: (id: string, input: UpdateOfferInput) => request<{ ok: true }>('PATCH', `/supplier/offers/${id}`, input),
       createOffer: (input: CreateOfferInput) => request<{ id: string }>('POST', '/supplier/offers', input),
       payouts: () => request<PayoutOverviewDTO>('GET', '/supplier/payouts'),
+      payoutProfile: () => request<PayoutProfileDTO>('GET', '/supplier/payout-profile'),
+      updatePayoutProfile: (input: PayoutProfileInput) => request<PayoutProfileDTO>('PUT', '/supplier/payout-profile', input),
     },
     admin: {
       overview: () => request<AdminOverviewDTO>('GET', '/admin/overview'),
@@ -207,6 +212,11 @@ export function createHavuzClient(opts: HavuzClientOptions) {
       markSettlementPaid: (id: string, input: MarkSettlementPaidInput) => request<{ ok: true }>('POST', `/admin/settlements/${id}/paid`, input),
       audit: (q?: string, entity?: string) => request<{ logs: AuditLogDTO[] }>('GET', '/admin/audit', undefined, { q, entity }),
       outbox: () => request<{ messages: OutboxDTO[] }>('GET', '/admin/outbox'),
+      supplierPayoutProfile: (id: string) => request<PayoutProfileDTO>('GET', `/admin/suppliers/${id}/payout-profile`),
+      updateSupplierPayoutProfile: (id: string, input: PayoutProfileInput) => request<PayoutProfileDTO>('PUT', `/admin/suppliers/${id}/payout-profile`, input),
+      syncSupplier: (id: string) => request<{ synced: boolean; reason?: string }>('POST', `/admin/suppliers/${id}/sync`),
+      refunds: () => request<{ refunds: RefundDTO[] }>('GET', '/admin/refunds'),
+      refundAction: (id: string, input: { action: 'retry' } | { action: 'mark_done'; note: string }) => request<{ ok: true }>('POST', `/admin/refunds/${id}`, input),
     },
   };
 }
